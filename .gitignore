@@ -59,10 +59,9 @@ venv.bak/
 !models/foli/classes_map.csv
 !models/foli/label_spaces.json
 !models/emotions/emotion_labels.json
+!models/emotions/tokenizer.json
 
-# Uploads and outputs
-uploads/*
-!uploads/.gitkeep
+# Outputs
 output/*
 !output/.gitkeep
 

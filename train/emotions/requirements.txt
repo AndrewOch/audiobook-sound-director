@@ -1,0 +1,20 @@
+# Core ML frameworks
+torch>=2.0.0
+
+# Tokenizers
+tokenizers>=0.13.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Training utilities  
+transformers>=4.30.0  # For learning rate schedulers
+
+# Data download
+gdown>=4.7.0  # For downloading from Google Drive
+requests>=2.31.0
+
+# Progress bars
+tqdm>=4.65.0
+
