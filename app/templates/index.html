@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Звукорежиссёр аудиокниг</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1',
+                        secondary: '#8b5cf6',
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body class="bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 min-h-screen">
+
+<!-- Main Content -->
+<main class="container mx-auto px-4 py-12">
+    <div class="max-w-4xl mx-auto">
+
+        <!-- Main Form Card -->
+        <div class="bg-white rounded-2xl shadow-xl p-8 mb-8 fade-in">
+            <form id="audiobookForm" class="space-y-8">
+                <!-- Input Type Selection -->
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-4">Выберите тип ввода</label>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 input-type-grid items-stretch">
+                        <!-- Text Input Option -->
+                        <label class="relative cursor-pointer block h-full">
+                            <input type="radio" name="inputType" value="text" class="peer sr-only" checked>
+                            <div class="border-2 border-gray-200 rounded-xl p-6 text-center transition-all hover:border-primary peer-checked:border-primary peer-checked:bg-indigo-50 peer-checked:shadow-md h-full input-type-card flex flex-col">
+                                <span class="material-icons-outlined text-5xl mx-auto mb-3 text-gray-400 peer-checked:text-primary">edit</span>
+                                <h3 class="font-semibold text-gray-900 mb-1">Текст</h3>
+                                <p class="text-sm text-gray-500">Введите или вставьте текст</p>
+                            </div>
+                        </label>
+
+                        <!-- Text File Option -->
+                        <label class="relative cursor-pointer block h-full">
+                            <input type="radio" name="inputType" value="text_file" class="peer sr-only">
+                            <div class="border-2 border-gray-200 rounded-xl p-6 text-center transition-all hover:border-primary peer-checked:border-primary peer-checked:bg-indigo-50 peer-checked:shadow-md h-full input-type-card flex flex-col">
+                                <span class="material-icons-outlined text-5xl mx-auto mb-3 text-gray-400 peer-checked:text-primary">description</span>
+                                <h3 class="font-semibold text-gray-900 mb-1">Текстовый файл</h3>
+                                <p class="text-sm text-gray-500">Загрузите файл .txt или .doc</p>
+                            </div>
+                        </label>
+
+                        <!-- Audio File Option -->
+                        <label class="relative cursor-pointer block h-full">
+                            <input type="radio" name="inputType" value="audio_file" class="peer sr-only">
+                            <div class="border-2 border-gray-200 rounded-xl p-6 text-center transition-all hover:border-primary peer-checked:border-primary peer-checked:bg-indigo-50 peer-checked:shadow-md h-full input-type-card flex flex-col">
+                                <span class="material-icons-outlined text-5xl mx-auto mb-3 text-gray-400 peer-checked:text-primary">audio_file</span>
+                                <h3 class="font-semibold text-gray-900 mb-1">Аудиофайл</h3>
+                                <p class="text-sm text-gray-500">Загрузите .mp3, .wav или .m4a</p>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Text Input Area -->
+                <div id="textInputArea" class="space-y-4">
+                    <label for="textInput" class="block text-sm font-semibold text-gray-700">Введите текст</label>
+                    <textarea
+                            id="textInput"
+                            name="textInput"
+                            rows="8"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all resize-none"
+                            placeholder="Вставьте текст вашей аудиокниги. ИИ определит эмоции и сгенерирует подходящую музыку и фоновые звуки..."
+                    ></textarea>
+                    <p class="text-sm text-gray-500">
+                        <span id="charCount">0</span> символов
+                    </p>
+                </div>
+
+                <!-- Text File Upload Area -->
+                <div id="textFileArea" class="hidden space-y-4">
+                    <label class="block text-sm font-semibold text-gray-700">Загрузка текстового файла</label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-all cursor-pointer"
+                         id="textFileDropZone">
+                        <input type="file" id="textFile" name="textFile" accept=".txt,.doc,.docx" class="hidden">
+                        <span class="material-icons-outlined text-6xl text-gray-400">cloud_upload</span>
+                        <p class="text-lg font-medium text-gray-700 mb-2">Нажмите для загрузки или перетащите файл</p>
+                        <p class="text-sm text-gray-500">TXT, DOC или DOCX (до 10MB)</p>
+                        <div id="textFileName" class="mt-4 text-sm font-medium text-primary hidden"></div>
+                    </div>
+                </div>
+
+                <!-- Audio File Upload Area -->
+                <div id="audioFileArea" class="hidden space-y-4">
+                    <label class="block text-sm font-semibold text-gray-700">Загрузка аудиофайла</label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-all cursor-pointer"
+                         id="audioFileDropZone">
+                        <input type="file" id="audioFile" name="audioFile" accept=".mp3,.wav,.m4a,.ogg" class="hidden">
+                        <span class="material-icons-outlined text-6xl text-gray-400">cloud_upload</span>
+                        <p class="text-lg font-medium text-gray-700 mb-2">Нажмите для загрузки или перетащите файл</p>
+                        <p class="text-sm text-gray-500">MP3, WAV, M4A или OGG (до 100MB)</p>
+                        <div id="audioFileName" class="mt-4 text-sm font-medium text-primary hidden"></div>
+                    </div>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="pt-4">
+                    <button
+                            type="submit"
+                            class="w-full bg-gradient-to-r from-primary to-secondary text-white font-semibold py-4 px-6 rounded-lg hover:shadow-lg transform hover:-translate-y-0.5 transition-all flex items-center justify-center space-x-2"
+                    >
+                        <span class="material-icons-outlined">arrow_forward</span>
+                        <span>Сгенерировать звукорежиссуру</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Processing Status (Hidden by default) -->
+        <div id="processingStatus" class="hidden bg-white rounded-2xl shadow-xl p-8 mb-8 fade-in">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-xl font-bold text-gray-900">Обработка аудиокниги</h3>
+                <div class="flex items-center space-x-2">
+                    <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+                    <span class="text-sm text-gray-600">В процессе...</span>
+                </div>
+            </div>
+
+            <!-- Progress Steps -->
+            <div class="space-y-4">
+                <div class="flex items-center space-x-4">
+                    <div class="flex-shrink-0 w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                        <span class="material-icons-outlined text-white text-base">check</span>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium text-gray-900">Входные данные получены</p>
+                        <p class="text-xs text-gray-500">Ваши данные загружены</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <div class="flex-shrink-0 w-8 h-8 bg-primary rounded-full flex items-center justify-center animate-pulse">
+                        <div class="w-3 h-3 bg-white rounded-full"></div>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium text-gray-900">Анализ эмоций</p>
+                        <p class="text-xs text-gray-500">Определение эмоциональной окраски...</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <div class="flex-shrink-0 w-8 h-8 bg-gray-300 rounded-full"></div>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium text-gray-500">Генерация музыки</p>
+                        <p class="text-xs text-gray-400">Ожидание...</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <div class="flex-shrink-0 w-8 h-8 bg-gray-300 rounded-full"></div>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium text-gray-500">Создание фоновых звуков</p>
+                        <p class="text-xs text-gray-400">Ожидание...</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <div class="flex-shrink-0 w-8 h-8 bg-gray-300 rounded-full"></div>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium text-gray-500">Сведение финального аудио</p>
+                        <p class="text-xs text-gray-400">Ожидание...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

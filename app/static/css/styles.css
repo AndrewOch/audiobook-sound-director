@@ -1,0 +1,39 @@
+/* Custom styles for Audiobook Sound Director UI */
+
+.file-input-wrapper {
+    position: relative;
+    overflow: hidden;
+    display: inline-block;
+}
+
+.file-input-wrapper input[type=file] {
+    position: absolute;
+    left: -9999px;
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Equalize heights for input type cards */
+.input-type-grid {
+    grid-auto-rows: 1fr;
+}
+.input-type-grid label {
+    height: 100%;
+    display: block;
+}
+.input-type-card {
+    height: 100%;
+}
