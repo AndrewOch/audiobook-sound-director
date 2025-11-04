@@ -35,7 +35,7 @@
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 input-type-grid items-stretch">
                         <!-- Text Input Option -->
                         <label class="relative cursor-pointer block h-full">
-                            <input type="radio" name="inputType" value="text" class="peer sr-only" checked>
+                            <input type="radio" name="inputType" value="text" class="peer sr-only">
                             <div class="border-2 border-gray-200 rounded-xl p-6 text-center transition-all hover:border-primary peer-checked:border-primary peer-checked:bg-indigo-50 peer-checked:shadow-md h-full input-type-card flex flex-col">
                                 <span class="material-icons-outlined text-5xl mx-auto mb-3 text-gray-400 peer-checked:text-primary">edit</span>
                                 <h3 class="font-semibold text-gray-900 mb-1">Текст</h3>
@@ -55,7 +55,7 @@
 
                         <!-- Audio File Option -->
                         <label class="relative cursor-pointer block h-full">
-                            <input type="radio" name="inputType" value="audio_file" class="peer sr-only">
+                            <input type="radio" name="inputType" value="audio_file" class="peer sr-only" checked>
                             <div class="border-2 border-gray-200 rounded-xl p-6 text-center transition-all hover:border-primary peer-checked:border-primary peer-checked:bg-indigo-50 peer-checked:shadow-md h-full input-type-card flex flex-col">
                                 <span class="material-icons-outlined text-5xl mx-auto mb-3 text-gray-400 peer-checked:text-primary">audio_file</span>
                                 <h3 class="font-semibold text-gray-900 mb-1">Аудиофайл</h3>
@@ -131,7 +131,7 @@
 
             <!-- Progress Steps -->
             <div class="space-y-4">
-                <div class="flex items-center space-x-4">
+                <div id="step-ingest" class="flex items-center space-x-4">
                     <div class="flex-shrink-0 w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
                         <span class="material-icons-outlined text-white text-base">check</span>
                     </div>
@@ -141,7 +141,7 @@
                     </div>
                 </div>
 
-                <div class="flex items-center space-x-4">
+                <div id="step-emotions" class="flex items-center space-x-4">
                     <div class="flex-shrink-0 w-8 h-8 bg-primary rounded-full flex items-center justify-center animate-pulse">
                         <div class="w-3 h-3 bg-white rounded-full"></div>
                     </div>
@@ -151,7 +151,7 @@
                     </div>
                 </div>
 
-                <div class="flex items-center space-x-4">
+                <div id="step-music" class="flex items-center space-x-4">
                     <div class="flex-shrink-0 w-8 h-8 bg-gray-300 rounded-full"></div>
                     <div class="flex-1">
                         <p class="text-sm font-medium text-gray-500">Генерация музыки</p>
@@ -159,7 +159,7 @@
                     </div>
                 </div>
 
-                <div class="flex items-center space-x-4">
+                <div id="step-foli" class="flex items-center space-x-4">
                     <div class="flex-shrink-0 w-8 h-8 bg-gray-300 rounded-full"></div>
                     <div class="flex-1">
                         <p class="text-sm font-medium text-gray-500">Создание фоновых звуков</p>
@@ -167,13 +167,35 @@
                     </div>
                 </div>
 
-                <div class="flex items-center space-x-4">
+                <div id="step-mixing" class="flex items-center space-x-4">
                     <div class="flex-shrink-0 w-8 h-8 bg-gray-300 rounded-full"></div>
                     <div class="flex-1">
                         <p class="text-sm font-medium text-gray-500">Сведение финального аудио</p>
                         <p class="text-xs text-gray-400">Ожидание...</p>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Track Editor (Hidden by default) -->
+        <div id="trackEditor" class="hidden bg-white rounded-2xl shadow-xl p-8 mb-8 fade-in">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-xl font-bold text-gray-900">Редактор аудиодорожек</h3>
+                <div class="flex items-center space-x-2">
+                    <button id="playAllBtn" class="px-4 py-2 bg-primary text-white rounded-lg hover:opacity-90">
+                        ▶︎ Воспроизвести
+                    </button>
+                    <button id="pauseAllBtn" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:opacity-90">
+                        ❚❚ Пауза
+                    </button>
+                    <button id="downloadMixBtn" class="px-4 py-2 bg-secondary text-white rounded-lg hover:opacity-90">
+                        ⬇︎ Скачать микс
+                    </button>
+                </div>
+            </div>
+
+            <div id="tracksContainer" class="space-y-4">
+                <!-- Tracks will render here -->
             </div>
         </div>
     </div>

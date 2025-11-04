@@ -7,8 +7,7 @@ emotion classification inference.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
-
+from typing import Literal, Optional
 
 # Project root and model paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -36,7 +35,7 @@ class InferenceConfig:
     padding_idx: int = 1
     
     # Device configuration
-    device: str | None = None  # If None, will auto-detect (cuda > mps > cpu)
+    device: Optional[str] = None  # If None, will auto-detect (cuda > mps > cpu)
     
     # Output settings
     top_k: int = 5  # Number of top predictions to return

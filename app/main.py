@@ -1,6 +1,7 @@
 """FastAPI application for Audiobook Sound Director (packaged)."""
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -11,6 +12,8 @@ from typing import Optional
 import uuid
 from datetime import datetime
 
+from modules.pipeline import PipelineService, PipelineServiceConfig
+from modules.pipeline.dto import InputRequest, JobInfo, MixRequest, MixResponse
 # Initialize FastAPI app
 app = FastAPI(
     title="Audiobook Sound Director",
@@ -47,6 +50,7 @@ async def home(request: Request):
 @app.post("/api/process")
 async def process_audiobook(
     request: Request,
+    background_tasks: BackgroundTasks,
     input_type: str = Form(...),
     text_input: Optional[str] = Form(None),
     text_file: Optional[UploadFile] = File(None),
@@ -64,65 +68,159 @@ async def process_audiobook(
         JSON response with processing status and results
     """
     try:
-        # Generate unique job ID and create job directory in output
+        # Create job meta and directory
         job_id = str(uuid.uuid4())
         job_dir = OUTPUT_DIR / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Extract text based on input type
-        text_content: Optional[str] = None
-        
-        if input_type == "text":
-            if not text_input:
-                raise HTTPException(status_code=400, detail="Text input is required")
-            text_content = text_input
-            
-        elif input_type == "text_file":
-            if not text_file:
-                raise HTTPException(status_code=400, detail="Text file is required")
-            # Read text file
-            content = await text_file.read()
-            text_content = content.decode("utf-8")
-            
-        elif input_type == "audio_file":
+        job_info = JobInfo(job_id=job_id, job_dir=job_dir, created_at=datetime.now().isoformat())
+
+        if input_type == "audio_file":
             if not audio_file:
                 raise HTTPException(status_code=400, detail="Audio file is required")
-            # Save audio file inside the job directory (no global uploads dir)
             audio_path = job_dir / f"input_{audio_file.filename}"
             with open(audio_path, "wb") as f:
                 shutil.copyfileobj(audio_file.file, f)
-            
-            # TODO: Transcribe audio using speech_recognition module
-            text_content = "[Audio transcription will be implemented]"
-            
         else:
-            raise HTTPException(status_code=400, detail="Invalid input type")
-        
-        # TODO: Full processing pipeline steps (emotions, foli, music, mixer)
-        
-        # Mock response for now
-        result = {
-            "job_id": job_id,
-            "status": "processing",
-            "input_type": input_type,
-            "text_preview": text_content[:200] if text_content else None,
-            "timestamp": datetime.now().isoformat(),
-            "message": "Processing started. Full pipeline will be implemented.",
-            "steps": {
-                "transcription": "pending" if input_type == "audio_file" else "skipped",
-                "emotion_analysis": "pending",
-                "foli_classification": "pending",
-                "speech_generation": "pending" if input_type == "text" else "skipped",
-                "music_generation": "pending",
-                "foli_generation": "pending",
-                "mixing": "pending"
-            }
+            raise HTTPException(status_code=400, detail="На данном этапе поддерживается только ввод аудиофайла")
+
+        # Write initial queued status file
+        initial_steps = {
+            "ingest": {"name": "ingest", "status": "pending"},
+            "transcription": {"name": "transcription", "status": "pending"},
+            "emotion_analysis": {"name": "emotion_analysis", "status": "pending"},
+            "foli_classification": {"name": "foli_classification", "status": "pending"},
+            "speech_generation": {"name": "speech_generation", "status": "skipped"},
+            "music_generation": {"name": "music_generation", "status": "pending"},
+            "foli_generation": {"name": "foli_generation", "status": "pending"},
+            "mixing": {"name": "mixing", "status": "pending"},
         }
-        
-        return JSONResponse(content=result)
-        
+        status_payload = {
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Job queued",
+            "timestamp": datetime.now().isoformat(),
+            "steps": initial_steps,
+            "outputs": {},
+        }
+        with open(job_dir / "job_status.json", "w", encoding="utf-8") as f:
+            import json as _json
+            _json.dump(status_payload, f, ensure_ascii=False, indent=2)
+
+        # Schedule background execution
+        def _run_pipeline_job(jid: str, apath: str):
+            service_cfg = PipelineServiceConfig(
+                enable_emotions=True,
+                enable_foli_classification=True,
+                enable_music_generation=True,
+                enable_foli_generation=True,
+                enable_mixing=False,
+            )
+            service = PipelineService(output_root=OUTPUT_DIR, config=service_cfg)
+            info = JobInfo(job_id=jid, job_dir=OUTPUT_DIR / jid, created_at=datetime.now().isoformat())
+            req = InputRequest(input_type="audio_file", audio_file_path=Path(apath))
+            try:
+                service.start_job(req, job=info, execute=True)
+            except Exception as e:
+                # Error details already written by service._save_status
+                pass
+
+        background_tasks.add_task(_run_pipeline_job, job_id, str(audio_path))
+
+        return JSONResponse(content={
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Processing started",
+            "timestamp": datetime.now().isoformat(),
+        })
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/tracks/{job_id}")
+async def get_tracks(job_id: str):
+    job_dir = OUTPUT_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+    tracks_path = job_dir / "tracks.json"
+    if not tracks_path.exists():
+        raise HTTPException(status_code=404, detail="Tracks not found")
+    return FileResponse(path=tracks_path, media_type="application/json", filename="tracks.json")
+
+
+@app.post("/api/mix")
+async def mix_audio(request: Request):
+    try:
+        payload = await request.json()
+        job_id = payload.get("job_id")
+        tracks_settings = payload.get("tracks", [])
+        if not job_id:
+            raise HTTPException(status_code=400, detail="job_id is required")
+
+        job_dir = OUTPUT_DIR / job_id
+        if not job_dir.exists():
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        tracks_json = job_dir / "tracks.json"
+        if not tracks_json.exists():
+            raise HTTPException(status_code=404, detail="Tracks not found for job")
+
+        # Load track descriptors
+        import json as _json
+        with open(tracks_json, "r", encoding="utf-8") as f:
+            track_descs = {t["id"]: t for t in _json.load(f)}
+
+        # Build mixer TrackSpec list for enabled tracks
+        from modules.mixer.config import TrackSpec as MixerTrackSpec
+        from modules.mixer.mixer import AudioMixer
+
+        def volume_to_db(v: float) -> float:
+            # Map linear volume [0,1] to dB gain; clamp at -60 dB
+            try:
+                import math
+                v = max(0.0, min(1.0, float(v)))
+                if v <= 0.0005:
+                    return -60.0
+                return 20.0 * math.log10(v)
+            except Exception:
+                return 0.0
+
+        specs = []
+        for ts in tracks_settings:
+            tid = ts.get("id")
+            enabled = bool(ts.get("enabled", True))
+            vol = float(ts.get("volume", 1.0))
+            desc = track_descs.get(tid)
+            if not desc or not enabled:
+                continue
+            specs.append(MixerTrackSpec(
+                path=desc["path"],
+                kind=desc["kind"],
+                channel=desc.get("channel"),
+                gain_db=volume_to_db(vol),
+            ))
+
+        if not specs:
+            raise HTTPException(status_code=400, detail="No enabled tracks to mix")
+
+        mixer = AudioMixer()
+        output_path = job_dir / "mixed.wav"
+        mixed_file = mixer.mix(specs, str(output_path))
+
+        return JSONResponse(content=MixResponse(
+            job_id=job_id,
+            status="ok",
+            download_url=f"/output/{job_id}/mixed.wav"
+        ).__dict__)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(content=MixResponse(
+            job_id=payload.get("job_id", ""),
+            status="error",
+            detail=str(e)
+        ).__dict__, status_code=500)
 
 
 @app.get("/api/status/{job_id}")
@@ -132,17 +230,14 @@ async def get_job_status(job_id: str):
     
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    # TODO: Implement actual status tracking
+    status_path = job_dir / "job_status.json"
+    if status_path.exists():
+        return FileResponse(path=status_path, media_type="application/json", filename="job_status.json")
+    # Fallback minimal info
     return JSONResponse(content={
         "job_id": job_id,
-        "status": "completed",
-        "files": {
-            "mixed_audio": f"/output/{job_id}/mixed.wav",
-            "speech_track": f"/output/{job_id}/speech.wav",
-            "music_track": f"/output/{job_id}/music.wav",
-            "foli_track": f"/output/{job_id}/foli.wav"
-        }
+        "status": "processing",
+        "timestamp": datetime.now().isoformat(),
     })
 
 

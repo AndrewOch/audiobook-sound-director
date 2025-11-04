@@ -42,7 +42,7 @@ class RecognizerConfig:
     verbose: bool = False  # Print progress
     
     # Device configuration
-    device: str | None = None  # If None, will auto-detect (cuda > cpu)
+    device: Optional[str] = None  # If None, will auto-detect (cuda > cpu)
     
     # Download options
     download_root: Optional[str] = None  # Custom model cache directory

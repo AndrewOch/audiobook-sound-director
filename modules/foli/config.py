@@ -7,8 +7,7 @@ foley sound classification inference.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
-
+from typing import Literal, Optional
 
 # Project root and model paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -30,7 +29,7 @@ class InferenceConfig:
     max_length: int = 256
     
     # Device configuration
-    device: str | None = None  # If None, will auto-detect (cuda > mps > cpu)
+    device: Optional[str] = None  # If None, will auto-detect (cuda > mps > cpu)
     
     # Inference settings
     use_fp16: bool = False  # Use mixed precision (only for CUDA)
