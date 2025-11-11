@@ -48,7 +48,8 @@ class SpeechRecognizer:
     def transcribe(
         self,
         audio_source: Union[str, Path],
-        return_word_timestamps: bool = True
+        return_word_timestamps: bool = True,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Transcribe audio file with timestamps.
@@ -90,7 +91,7 @@ class SpeechRecognizer:
         # Transcribe using Whisper
         result = self.model.transcribe(
             audio_path,
-            language=self.config.language,
+            language=language if language is not None else self.config.language,
             task=self.config.task,
             word_timestamps=self.config.word_timestamps,
             temperature=self.config.temperature,
@@ -211,11 +212,8 @@ class SpeechRecognizer:
         Returns:
             List of language codes
         """
-        try:
-            import whisper
-            return list(whisper.tokenizer.LANGUAGES.keys())
-        except:
-            return ['en', 'ru', 'de', 'es', 'fr', 'it', 'ja', 'ko', 'pt', 'zh']
+        # Static set covering common languages
+        return ['en', 'ru', 'de', 'es', 'fr', 'it', 'ja', 'ko', 'pt', 'zh']
     
     def change_model(self, model_size: str):
         """

@@ -68,17 +68,15 @@ class InputProcessor:
 
             # Transcribe using speech recognition module
             try:
-                from modules.speech_recognition.recognizer import SpeechRecognizer
-                from modules.speech_recognition.config import RecognizerConfig
-                self.logger.info("[Job %s] Transcription: loading recognizer (lang=%s)", job.job_id, request.language or "auto")
+                from modules.pipeline.registry import get_speech_recognizer
+                self.logger.info("[Job %s] Transcription: using shared recognizer (lang=%s)", job.job_id, request.language or "auto")
                 t0 = time.perf_counter()
-                cfg = RecognizerConfig(language=request.language) if request.language else RecognizerConfig()
-                recognizer = SpeechRecognizer(cfg)
+                recognizer = get_speech_recognizer()
                 t1 = time.perf_counter()
-                self.logger.info("[Job %s] Transcription: model ready in %.2fs", job.job_id, (t1 - t0))
+                self.logger.info("[Job %s] Transcription: recognizer ready in %.2fs", job.job_id, (t1 - t0))
                 self.logger.info("[Job %s] Transcription: started for %s", job.job_id, job_audio)
                 t2 = time.perf_counter()
-                result = recognizer.transcribe(job_audio, return_word_timestamps=True)
+                result = recognizer.transcribe(job_audio, return_word_timestamps=True, language=request.language)
                 t3 = time.perf_counter()
                 self.logger.info("[Job %s] Transcription: completed in %.2fs", job.job_id, (t3 - t2))
 

@@ -16,14 +16,6 @@ from .model import AudioLDM2Model
 
 
 class FoliGenerator:
-    """High-level generator for text-to-audio foley SFX using AudioLDM2.
-
-    Example:
-        >>> gen = FoliGenerator()
-        >>> audio = gen.generate("A hammer hitting a wooden surface")
-        >>> gen.save_audio(audio, "hammer.wav")
-    """
-
     def __init__(self, config: Optional[FoliGenConfig] = None, job_dir: Optional[Union[str, Path]] = None):
         self.config = config or FoliGenConfig()
         self.model = AudioLDM2Model(self.config)

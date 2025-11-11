@@ -119,13 +119,33 @@ class MusicGenerator:
         
         # Generate audio
         print(f"Generating {duration_seconds}s audio ({max_tokens} tokens)...")
-        with torch.no_grad():
-            audio_values = self.model_wrapper.model.generate(
-                **inputs,
-                do_sample=self.config.do_sample,
-                guidance_scale=self.config.guidance_scale,
-                max_new_tokens=max_tokens
-            )
+        try:
+            with torch.no_grad():
+                audio_values = self.model_wrapper.model.generate(
+                    **inputs,
+                    do_sample=self.config.do_sample,
+                    guidance_scale=self.config.guidance_scale,
+                    max_new_tokens=max_tokens
+                )
+        except Exception as e:
+            # Fallback: if running on MPS and generation fails, retry on CPU
+            if str(self.model_wrapper.device) == "mps":
+                print(f"MPS generation failed, retrying on CPU: {e}")
+                # Reload model on CPU in float32
+                self.config.device = "cpu"
+                self.model_wrapper = MusicGenModel(self.config)
+                self.model_wrapper.load()
+                # Move inputs to CPU
+                inputs = {k: v.to(self.model_wrapper.device) for k, v in inputs.items()}
+                with torch.no_grad():
+                    audio_values = self.model_wrapper.model.generate(
+                        **inputs,
+                        do_sample=self.config.do_sample,
+                        guidance_scale=self.config.guidance_scale,
+                        max_new_tokens=max_tokens
+                    )
+            else:
+                raise
         
         # Convert to numpy array (mono audio)
         audio_array = audio_values[0, 0].cpu().numpy()

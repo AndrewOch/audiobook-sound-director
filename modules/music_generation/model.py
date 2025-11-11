@@ -37,21 +37,30 @@ class MusicGenModel:
         """Load the model and processor from HuggingFace."""
         print(f"Loading MusicGen model: {self.config.model_name}")
         
-        # Load model
+        # Choose device (cuda > mps > cpu)
+        if self.config.device == "auto":
+            if torch.cuda.is_available():
+                self.device = "cuda"
+            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                self.device = "mps"
+            else:
+                self.device = "cpu"
+        else:
+            self.device = self.config.device
+
+        # Prefer half precision on GPU/MPS for speed
+        dtype = torch.float16 if self.device in ("cuda", "mps") else torch.float32
+
+        # Load model with desired dtype
         self.model = MusicgenForConditionalGeneration.from_pretrained(
-            self.config.model_name
+            self.config.model_name,
+            dtype=dtype,
         )
         
         # Load processor
         self.processor = AutoProcessor.from_pretrained(self.config.model_name)
         
-        # Set device
-        if self.config.device == "auto":
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            self.device = self.config.device
-            
-        print(f"Using device: {self.device}")
+        print(f"Using device: {self.device}, dtype: {dtype}")
         self.model.to(self.device)
         
         # Get sampling rate from model config

@@ -14,6 +14,7 @@ from datetime import datetime
 
 from modules.pipeline import PipelineService, PipelineServiceConfig
 from modules.pipeline.dto import InputRequest, JobInfo, MixRequest, MixResponse
+from modules.pipeline.registry import warm_up
 # Initialize FastAPI app
 app = FastAPI(
     title="Audiobook Sound Director",
@@ -40,6 +41,15 @@ app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
 # Setup templates
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+
+@app.on_event("startup")
+async def _startup_preload():
+    # Preload heavy models to avoid cold-start latency
+    try:
+        warm_up()
+    except Exception:
+        # Fail-safe: proceed even if some models fail to preload
+        pass
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -121,8 +131,23 @@ async def process_audiobook(
             try:
                 service.start_job(req, job=info, execute=True)
             except Exception as e:
-                # Error details already written by service._save_status
-                pass
+                # Ensure we persist an error status even if the pipeline failed early
+                try:
+                    import json as _json
+                    err_payload = {
+                        "job_id": jid,
+                        "status": "error",
+                        "message": str(e),
+                        "timestamp": datetime.now().isoformat(),
+                        "steps": {
+                            "ingest": {"name": "ingest", "status": "error", "detail": str(e)},
+                        },
+                        "outputs": {},
+                    }
+                    with open((OUTPUT_DIR / jid / "job_status.json"), "w", encoding="utf-8") as _f:
+                        _json.dump(err_payload, _f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
 
         background_tasks.add_task(_run_pipeline_job, job_id, str(audio_path))
 

@@ -34,8 +34,8 @@ class RecognizerConfig:
     
     # Transcription parameters
     temperature: float = 0.0  # Higher = more random
-    beam_size: int = 5  # Beam search width
-    best_of: int = 5  # Number of candidates
+    beam_size: int = 1  # Beam search width (lower = faster)
+    best_of: int = 1  # Number of candidates (lower = faster)
     patience: float = 1.0  # Beam search patience
     
     # Output options
@@ -48,12 +48,17 @@ class RecognizerConfig:
     download_root: Optional[str] = None  # Custom model cache directory
     
     def __post_init__(self):
-        """Auto-detect device if not specified."""
+        """Auto-detect device if not specified (CUDA > MPS > CPU)."""
         if self.device is None:
-            import torch
-            if torch.cuda.is_available():
-                self.device = "cuda"
-            else:
+            try:
+                import torch  # type: ignore
+                if torch.cuda.is_available():
+                    self.device = "cuda"
+                elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                    self.device = "mps"
+                else:
+                    self.device = "cpu"
+            except Exception:
                 self.device = "cpu"
 
 

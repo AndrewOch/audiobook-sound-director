@@ -27,7 +27,7 @@ class WhisperModel:
         
         Args:
             model_size: Size of the model ('tiny', 'base', 'small', 'medium', 'large')
-            device: Device to run on ('cpu', 'cuda')
+            device: Device to run on ('cpu', 'cuda', 'mps')
             download_root: Custom directory for model cache (optional)
         """
         self.model_size = model_size
@@ -49,11 +49,24 @@ class WhisperModel:
         
         print(f"Loading Whisper model '{self.model_size}' on '{self.device}'...")
         
-        self.model = whisper.load_model(
-            self.model_size,
-            device=self.device,
-            download_root=self.download_root
-        )
+        try:
+            self.model = whisper.load_model(
+                self.model_size,
+                device=self.device,
+                download_root=self.download_root
+            )
+        except Exception as e:
+            # Some PyTorch versions have incomplete MPS ops; fallback to CPU
+            if self.device == 'mps':
+                print(f"MPS load failed, falling back to CPU: {e}")
+                self.device = 'cpu'
+                self.model = whisper.load_model(
+                    self.model_size,
+                    device=self.device,
+                    download_root=self.download_root
+                )
+            else:
+                raise
         
         print(f"✓ Model loaded successfully")
     
@@ -112,10 +125,19 @@ class WhisperModel:
         # Remove None values
         options = {k: v for k, v in options.items() if v is not None}
         
-        # Transcribe
-        result = self.model.transcribe(audio_path, **options)
-        
-        return result
+        # Transcribe with safe fallback from MPS to CPU if needed
+        try:
+            result = self.model.transcribe(audio_path, **options)
+            return result
+        except NotImplementedError as e:
+            if self.device == 'mps':
+                print(f"MPS transcribe failed, retrying on CPU: {e}")
+                self.unload()
+                self.device = 'cpu'
+                self._load_model()
+                result = self.model.transcribe(audio_path, **options)
+                return result
+            raise
     
     def get_model_info(self) -> Dict[str, Any]:
         """
@@ -143,4 +165,5 @@ class WhisperModel:
                 torch.cuda.empty_cache()
             
             print("✓ Model unloaded")
+
 

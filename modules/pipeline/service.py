@@ -27,6 +27,11 @@ from .dto import (
     new_job,
 )
 from modules.ingest import InputProcessor
+from modules.pipeline.registry import (
+    get_emotion_classifier,
+    get_foli_classifier,
+    get_music_generator,
+)
 
 
 @dataclass
@@ -252,9 +257,7 @@ class PipelineService:
         steps["mixing"].status = "pending" if self.config.enable_mixing else "skipped"
 
     def _run_emotion_analysis(self, ingest_result: IngestResult, job: JobInfo) -> Tuple[List[Tuple[str, float]], Dict[str, Path]]:
-        from modules.emotions.inference import EmotionClassifier
-
-        clf = EmotionClassifier()
+        clf = get_emotion_classifier()
         pred = clf.predict(ingest_result.text)
         top5 = pred.get("top5", [])
         # Convert to (emotion, prob) tuples
@@ -270,15 +273,8 @@ class PipelineService:
         return emotions, {"emotions.json": out_path}
 
     def _run_foli_classification(self, ingest_result: IngestResult, job: JobInfo) -> Tuple[Dict, Dict[str, Path]]:
-        # Prefer ONNX if available for speed; fallback to PyTorch
-        try:
-            from modules.foli.inference import FoliClassifierONNX as FoliCls
-            backend = "onnx"
-        except Exception:
-            from modules.foli.inference import FoliClassifierPyTorch as FoliCls
-            backend = "pytorch"
-
-        clf = FoliCls()
+        clf = get_foli_classifier()
+        backend = "onnx" if clf.__class__.__name__.endswith("ONNX") else "pytorch"
         pred = clf.predict(ingest_result.text)
         self.logger.info("[Job %s] Foli classification backend: %s", job.job_id, backend)
 
@@ -292,9 +288,7 @@ class PipelineService:
         return pred, {"foli_predictions.json": out_path}
 
     def _run_music_generation(self, emotions: Optional[List[Tuple[str, float]]], job: JobInfo) -> Tuple[Path, Dict[str, Path]]:
-        from modules.music_generation.generator import MusicGenerator
-
-        generator = MusicGenerator()
+        generator = get_music_generator()
         # Use emotions if provided, else a safe default prompt
         if emotions:
             self.logger.info("[Job %s] Music prompt from emotions: %s", job.job_id, ", ".join([e for e, _ in emotions]))
