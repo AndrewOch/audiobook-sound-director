@@ -118,7 +118,26 @@ class FoliGenerator:
         sr = sampling_rate or self.model.sampling_rate
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        scipy.io.wavfile.write(str(output_path), rate=int(sr), data=audio)
+        
+        # Конвертируем в поддерживаемый тип данных
+        # scipy.io.wavfile.write поддерживает int16, int32, float32
+        audio_processed = audio.copy()
+        
+        # Конвертируем float16 в float32
+        if audio_processed.dtype == np.float16:
+            audio_processed = audio_processed.astype(np.float32)
+        
+        # Нормализуем значения в диапазон [-1.0, 1.0] для float32
+        if audio_processed.dtype == np.float32:
+            max_val = np.abs(audio_processed).max()
+            if max_val > 1.0:
+                audio_processed = audio_processed / max_val
+        
+        # Убеждаемся, что это float32 (поддерживается scipy)
+        if audio_processed.dtype != np.float32:
+            audio_processed = audio_processed.astype(np.float32)
+        
+        scipy.io.wavfile.write(str(output_path), rate=int(sr), data=audio_processed)
 
     def get_sampling_rate(self) -> int:
         if not self.model.is_loaded():

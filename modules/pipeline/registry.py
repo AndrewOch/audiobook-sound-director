@@ -69,6 +69,7 @@ def get_speech_recognizer():
             from modules.speech_recognition.recognizer import SpeechRecognizer
             from modules.speech_recognition.config import RecognizerConfig
             # Default language None -> auto; language can be overridden per call
+            # download_root будет автоматически установлен в __post_init__ из cache_config
             cfg = RecognizerConfig(language=None)
             _speech = SpeechRecognizer(cfg)
         return _speech

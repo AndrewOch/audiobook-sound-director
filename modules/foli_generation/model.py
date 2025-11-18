@@ -25,6 +25,9 @@ class AudioLDM2Model:
 
     def load(self):
         from diffusers import AudioLDM2Pipeline
+        import logging
+        
+        logger = logging.getLogger("audiobook.foli_generation")
 
         # Determine device
         if self.config.device == "auto":
@@ -40,14 +43,22 @@ class AudioLDM2Model:
         # Choose dtype
         dtype = torch.float16 if (self.device == "cuda" and self.config.use_fp16) else torch.float32
 
+        logger.info(f"Загрузка модели AudioLDM2: {self.config.repo_id}")
+        logger.info(f"Это может занять несколько минут при первом запуске (загрузка ~2-3 ГБ)...")
+        logger.info(f"Устройство: {self.device}, Тип данных: {dtype}")
+
         # Load pipeline
         self.pipe = AudioLDM2Pipeline.from_pretrained(
             self.config.repo_id,
             dtype=dtype,
         )
 
+        logger.info("Модель загружена, перемещение на устройство...")
+        
         # Move to device
         self.pipe = self.pipe.to(self.device)
+        
+        logger.info("Модель AudioLDM2 готова к использованию")
 
         # AudioLDM2 outputs audios at 16 kHz typically
         try:

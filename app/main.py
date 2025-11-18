@@ -1,12 +1,25 @@
 """FastAPI application for Audiobook Sound Director (packaged)."""
 
+# КРИТИЧНО: Настраиваем кэш ПЕРЕД импортом любых модулей, которые могут использовать кэш
+from pathlib import Path
+import sys
+
+# Определяем корень проекта
+_APP_DIR = Path(__file__).resolve().parent
+_ROOT_DIR = _APP_DIR.parent
+
+# Настраиваем кэш на внешний диск ПЕРЕД загрузкой моделей
+# Импортируем напрямую, чтобы избежать циклических зависимостей
+from modules.cache_config import setup_cache_directories
+setup_cache_directories(_ROOT_DIR)
+
+# Теперь можно импортировать остальные модули
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi import BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
-from pathlib import Path
 import shutil
 from typing import Optional
 import uuid
@@ -15,6 +28,7 @@ from datetime import datetime
 from modules.pipeline import PipelineService, PipelineServiceConfig
 from modules.pipeline.dto import InputRequest, JobInfo, MixRequest, MixResponse
 from modules.pipeline.registry import warm_up
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Audiobook Sound Director",
@@ -23,8 +37,8 @@ app = FastAPI(
 )
 
 # Setup directories
-APP_DIR = Path(__file__).resolve().parent
-ROOT_DIR = APP_DIR.parent
+APP_DIR = _APP_DIR
+ROOT_DIR = _ROOT_DIR
 STATIC_DIR = APP_DIR / "static"
 TEMPLATES_DIR = APP_DIR / "templates"
 OUTPUT_DIR = ROOT_DIR / "output"

@@ -186,8 +186,9 @@ class PipelineService:
             if self.config.enable_foli_generation:
                 try:
                     self.logger.info("[Job %s] Foli generation started", job_info.job_id)
+                    self.logger.info("[Job %s] ВНИМАНИЕ: При первом запуске загружается модель AudioLDM2 (~2-3 ГБ, 26 файлов). Это может занять 5-10 минут.", job_info.job_id)
                     steps["foli_generation"].status = "running"
-                    self._save_status(job_info, steps, status="processing", message="Foli generation running")
+                    self._save_status(job_info, steps, status="processing", message="Foli generation running - загрузка модели AudioLDM2 (может занять несколько минут при первом запуске)")
                     t0 = time.perf_counter()
                     foli_paths, foli_artifacts = self._run_foli_generation(job_info)
                     t1 = time.perf_counter()
@@ -331,13 +332,20 @@ class PipelineService:
                 return "Ambient background noise, high quality, clear."
             return label_to_prompt(top)
 
+        self.logger.info("[Job %s] Инициализация генератора фоли звуков...", job.job_id)
         generator = FoliGenerator(FoliGenConfig())
+        
+        # Предзагружаем модель, чтобы пользователь видел прогресс загрузки
+        self.logger.info("[Job %s] Загрузка модели AudioLDM2 (это может занять несколько минут при первом запуске)...", job.job_id)
+        generator.load_model()
+        self.logger.info("[Job %s] Модель AudioLDM2 загружена, начинаем генерацию фоли звуков...", job.job_id)
 
         paths: List[Path] = []
         artifacts: Dict[str, Path] = {}
         seeds = {"ch1": 0, "ch2": 1, "ch3": 2}
 
         for ch in ("ch1", "ch2", "ch3"):
+            self.logger.info("[Job %s] Генерация фоли звука для канала %s...", job.job_id, ch)
             prompt = build_prompt(preds.get(ch) if isinstance(preds, dict) else None)
             audio = generator.generate(
                 prompt=prompt,

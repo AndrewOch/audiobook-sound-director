@@ -9,6 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
+# Импортируем функцию для получения пути кэша
+try:
+    from modules.cache_config import get_whisper_download_root
+except ImportError:
+    # Fallback если модуль не найден
+    def get_whisper_download_root():
+        return None
+
 
 # Project root
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -60,6 +68,12 @@ class RecognizerConfig:
                     self.device = "cpu"
             except Exception:
                 self.device = "cpu"
+        
+        # Устанавливаем download_root на внешний диск, если не указан явно
+        if self.download_root is None:
+            whisper_cache = get_whisper_download_root()
+            if whisper_cache:
+                self.download_root = str(whisper_cache)
 
 
 # Default configuration instance
