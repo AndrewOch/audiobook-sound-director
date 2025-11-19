@@ -889,6 +889,74 @@ def _run_generation_task(job_id: str, job_dir: Path, task_id: str, kind: str, se
         else:
             raise ValueError("Unsupported generation type")
 
+        # Special handling: for music with multiple segments -> generate ONE continuous track
+        if kind == "music" and len(segment_ids) > 1:
+            try:
+                sids = sorted([sid for sid in segment_ids if sid < len(segments)])
+                if not sids:
+                    raise ValueError("No valid segments selected")
+                first_id = sids[0]
+                last_id = sids[-1]
+                first_seg = segments[first_id]
+                last_seg = segments[last_id]
+                start_time = float(first_seg.get("start", 0.0))
+                end_time = float(last_seg.get("end", 0.0))
+                duration = max(5.0, float(end_time - start_time))
+                # Cap duration to avoid extreme requests
+                duration = min(duration, 120.0)
+                # Build timeline prompt with emotions across selected range
+                lines = []
+                for sid in sids:
+                    seg = segments[sid]
+                    emo = seg_emotions.get(sid, {})
+                    label = emo.get("emotion", "neutral")
+                    conf = float(emo.get("confidence", 0.0))
+                    rel_start = max(0.0, float(seg.get("start", 0.0)) - start_time)
+                    rel_end = max(rel_start, float(seg.get("end", 0.0)) - start_time)
+                    lines.append(f"{rel_start:.1f}-{rel_end:.1f}s: {label} ({int(conf*100)}%)")
+                timeline_text = "\n".join(lines)
+                prompt = (
+                    f"Generate a cohesive background music for audiobook narration. "
+                    f"Total duration: {int(duration)} seconds. Use smooth transitions when emotion changes. "
+                    f"Timeline (relative to start):\n{timeline_text}"
+                )
+                audio = music_gen.generate_from_prompt(prompt, duration_seconds=int(duration))
+                out_path = job_dir / f"music_range_{first_id}_{last_id}.wav"
+                music_gen.save_audio(audio, out_path)
+                generated_tracks.append({
+                    "id": f"music_range_{first_id}_{last_id}",
+                    "type": "music",
+                    "url": f"/output/{job_id}/music_range_{first_id}_{last_id}.wav",
+                    "start_time": start_time,
+                    "volume": 0.5,
+                    "enabled": True,
+                })
+                _append_tracks(job_dir, generated_tracks)
+                update({
+                    "task_id": task_id,
+                    "type": kind,
+                    "segment_ids": segment_ids,
+                    "state": "completed",
+                    "progress": 100,
+                    "message": f"Completed 1 track for range {first_id}-{last_id}",
+                    "result_tracks": generated_tracks,
+                    "created_at": tasks_state.get(task_id, {}).get("created_at"),
+                    "finished_at": datetime.now().isoformat(),
+                })
+                return
+            except Exception as gen_err:
+                update({
+                    "task_id": task_id,
+                    "type": kind,
+                    "segment_ids": segment_ids,
+                    "state": "error",
+                    "progress": 0,
+                    "message": f"Music range generation failed: {gen_err}",
+                    "created_at": tasks_state.get(task_id, {}).get("created_at"),
+                    "finished_at": datetime.now().isoformat(),
+                })
+                return
+
         for idx, seg_id in enumerate(segment_ids):
             if seg_id >= len(segments):
                 continue
