@@ -302,9 +302,14 @@ class PipelineService:
         merged.append(current)
         return merged
     
-    def _write_transcript_merged(self, job: JobInfo, merged_groups: List[Dict]) -> None:
+    def _write_transcript_merged(self, job: JobInfo, merged_groups: List[Dict], total_duration: Optional[float] = None) -> None:
         """Persist merged transcript to transcript_merged.json for UI."""
         try:
+            if total_duration is None:
+                try:
+                    total_duration = max([float(g.get("end", 0.0)) for g in merged_groups]) if merged_groups else 0.0
+                except Exception:
+                    total_duration = 0.0
             payload = {
                 "segments": [
                     {
@@ -316,6 +321,8 @@ class PipelineService:
                     for g in merged_groups
                 ]
             }
+            # Include total duration for timeline
+            payload["duration"] = float(total_duration or 0.0)
             with open(job.job_dir / "transcript_merged.json", "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -352,8 +359,8 @@ class PipelineService:
         segments_emotions: List[SegmentEmotion] = []
         if ingest_result.segments:
             merged_groups = self._merge_transcript_segments(ingest_result.segments, max_gap_s=0.5)
-            # Save merged transcript for UI
-            self._write_transcript_merged(job, merged_groups)
+            # Save merged transcript for UI (with duration)
+            self._write_transcript_merged(job, merged_groups, total_duration=ingest_result.duration)
             self.logger.info(
                 "[Job %s] Emotion analysis: original segments=%d, merged groups=%d",
                 job.job_id, len(ingest_result.segments), len(merged_groups)
@@ -403,8 +410,8 @@ class PipelineService:
         segments_foli: List[SegmentFoli] = []
         if ingest_result.segments:
             merged_groups = self._merge_transcript_segments(ingest_result.segments, max_gap_s=0.5)
-            # Ensure merged transcript persisted (if not already)
-            self._write_transcript_merged(job, merged_groups)
+            # Ensure merged transcript persisted (if not already), include duration
+            self._write_transcript_merged(job, merged_groups, total_duration=ingest_result.duration)
             self.logger.info(
                 "[Job %s] Foli classification: original segments=%d, merged groups=%d",
                 job.job_id, len(ingest_result.segments), len(merged_groups)

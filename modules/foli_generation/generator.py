@@ -121,7 +121,21 @@ class FoliGenerator:
         
         # Конвертируем в поддерживаемый тип данных
         # scipy.io.wavfile.write поддерживает int16, int32, float32
-        audio_processed = audio.copy()
+        audio_processed = np.array(audio, copy=True)
+        # Replace NaN/Inf with 0
+        if not np.isfinite(audio_processed).all():
+            audio_processed = np.nan_to_num(audio_processed, nan=0.0, posinf=0.0, neginf=0.0)
+        # Ensure shape sane: convert to mono 1D
+        if audio_processed.ndim > 2:
+            audio_processed = np.mean(audio_processed, axis=tuple(range(1, audio_processed.ndim)))
+        if audio_processed.ndim == 2:
+            # Use first channel if stereo-like array is (channels, samples) or (samples, channels)
+            if audio_processed.shape[0] in (1, 2):
+                audio_processed = audio_processed[0]
+            elif audio_processed.shape[1] in (1, 2):
+                audio_processed = audio_processed[:,0]
+            else:
+                audio_processed = np.mean(audio_processed, axis=-1)
         
         # Конвертируем float16 в float32
         if audio_processed.dtype == np.float16:
@@ -129,15 +143,19 @@ class FoliGenerator:
         
         # Нормализуем значения в диапазон [-1.0, 1.0] для float32
         if audio_processed.dtype == np.float32:
-            max_val = np.abs(audio_processed).max()
-            if max_val > 1.0:
-                audio_processed = audio_processed / max_val
+            audio_processed = np.clip(audio_processed, -1.0, 1.0)
         
         # Убеждаемся, что это float32 (поддерживается scipy)
         if audio_processed.dtype != np.float32:
             audio_processed = audio_processed.astype(np.float32)
         
-        scipy.io.wavfile.write(str(output_path), rate=int(sr), data=audio_processed)
+        # Prefer PCM_16
+        try:
+            import soundfile as sf  # type: ignore
+            sf.write(str(output_path), audio_processed, samplerate=int(sr), subtype='PCM_16', format='WAV')
+        except Exception:
+            int16 = np.int16(np.clip(audio_processed * 32767.0, -32768, 32767))
+            scipy.io.wavfile.write(str(output_path), rate=int(sr), data=int16)
 
     def get_sampling_rate(self) -> int:
         if not self.model.is_loaded():

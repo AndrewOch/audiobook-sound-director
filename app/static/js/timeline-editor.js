@@ -41,6 +41,10 @@ class TimelineEditor {
         this.elements = {
             playBtn: document.getElementById('timeline-play-btn'),
             pauseBtn: document.getElementById('timeline-pause-btn'),
+                beginBtn: document.getElementById('timeline-begin'),
+                rewindBtn: document.getElementById('timeline-rewind'),
+                forwardBtn: document.getElementById('timeline-forward'),
+                endBtn: document.getElementById('timeline-end'),
             timeInput: document.getElementById('timeline-time-input'),
             timeDisplay: document.getElementById('timeline-time-display'),
             zoomOut: document.getElementById('timeline-zoom-out'),
@@ -80,11 +84,23 @@ class TimelineEditor {
                 <!-- Toolbar -->
                 <div class="timeline-toolbar">
                     <div class="toolbar-left">
-                        <button class="btn-play" id="timeline-play-btn">
-                            <span class="play-icon">▶</span>
+                        <button type="button" class="btn-play" id="timeline-play-btn" title="Воспроизвести">
+                            <span class="material-icons-outlined">play_arrow</span>
                         </button>
-                        <button class="btn-pause" id="timeline-pause-btn" style="display: none;">
-                            <span class="pause-icon">❚❚</span>
+                        <button type="button" class="btn-pause" id="timeline-pause-btn" style="display: none;" title="Пауза">
+                            <span class="material-icons-outlined">pause</span>
+                        </button>
+                        <button type="button" class="btn-begin" id="timeline-begin" title="В начало">
+                            <span class="material-icons-outlined">first_page</span>
+                        </button>
+                        <button type="button" class="btn-rewind" id="timeline-rewind" title="-10с">
+                            <span class="material-icons-outlined">replay_10</span>
+                        </button>
+                        <button type="button" class="btn-forward" id="timeline-forward" title="+10с">
+                            <span class="material-icons-outlined">forward_10</span>
+                        </button>
+                        <button type="button" class="btn-end" id="timeline-end" title="В конец">
+                            <span class="material-icons-outlined">last_page</span>
                         </button>
                         <input type="number" class="time-input" id="timeline-time-input" value="0" step="0.1" min="0">
                         <span class="time-display" id="timeline-time-display">00:00 / 00:00</span>
@@ -211,6 +227,11 @@ class TimelineEditor {
         // Zoom controls
         if (this.elements.zoomIn) this.elements.zoomIn.addEventListener('click', () => this.zoomIn());
         if (this.elements.zoomOut) this.elements.zoomOut.addEventListener('click', () => this.zoomOut());
+        // Transport controls
+        if (this.elements.beginBtn) this.elements.beginBtn.addEventListener('click', () => this.seekTo(0));
+        if (this.elements.endBtn) this.elements.endBtn.addEventListener('click', () => this.seekTo(this.projectData?.duration || 0));
+        if (this.elements.rewindBtn) this.elements.rewindBtn.addEventListener('click', () => this.seekTo(Math.max(0, (this.playheadPosition - 10))));
+        if (this.elements.forwardBtn) this.elements.forwardBtn.addEventListener('click', () => this.seekTo(Math.min((this.projectData?.duration || 0), (this.playheadPosition + 10))));
         
         // Selection actions
         if (this.elements.generateMusicBtn) this.elements.generateMusicBtn.addEventListener('click', () => this.generateForSelection('music'));
@@ -254,7 +275,7 @@ class TimelineEditor {
     loadProject(projectData) {
         this.projectData = projectData;
         this.segments = projectData.segments || [];
-        this.tracks = projectData.tracks || [];
+        this.tracks = (projectData.tracks || []).filter(t => t.id !== 'speech');
         this.playheadPosition = projectData.playhead_position || 0.0;
         this.zoomLevel = projectData.zoom_level || 1.0;
         
@@ -277,9 +298,28 @@ class TimelineEditor {
         this.audioElement.addEventListener('ended', () => {
             this.pause();
         });
+        // Setup WebAudio for speech gain control
+        this.setupSpeechAudioGraph();
         
         // Load waveform
         this.loadWaveform(audioUrl);
+    }
+    
+    setupSpeechAudioGraph() {
+        try {
+            if (this._audioGraphReady || !this.audioElement) return;
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            this._audioCtx = this._audioCtx || new AudioCtx();
+            this._speechSource = this._speechSource || this._audioCtx.createMediaElementSource(this.audioElement);
+            this._speechGainNode = this._speechGainNode || this._audioCtx.createGain();
+            this._speechGainNode.gain.value = 1.0;
+            this._speechSource.connect(this._speechGainNode);
+            this._speechGainNode.connect(this._audioCtx.destination);
+            this._audioGraphReady = true;
+        } catch (e) {
+            console.warn('Speech audio graph setup failed:', e);
+        }
     }
     
     async loadWaveform(audioUrl) {
@@ -564,6 +604,9 @@ class TimelineEditor {
     play() {
         if (this.audioElement) {
             this.audioElement.currentTime = this.playheadPosition;
+            if (this._audioCtx && this._audioCtx.state === 'suspended') {
+                try { this._audioCtx.resume(); } catch {}
+            }
             this.audioElement.play();
             this.isPlaying = true;
             this.elements.playBtn.style.display = 'none';
@@ -572,11 +615,28 @@ class TimelineEditor {
         
         // Play all enabled tracks
         this.tracks.forEach(track => {
-            if (track.enabled && track.audioElement) {
-                track.audioElement.currentTime = this.playheadPosition - (track.start_time || 0);
-                if (track.audioElement.currentTime >= 0 && track.audioElement.currentTime < track.audioElement.duration) {
-                    track.audioElement.play();
-                }
+            if (!track.enabled || !track.audioElement) return;
+            const offset = this.playheadPosition - (track.start_time || 0);
+            const startAndPlay = () => {
+                try {
+                    track.audioElement.currentTime = Math.max(0, offset);
+                    if (offset >= 0 && offset < (track.audioElement.duration || Infinity)) {
+                        track.audioElement.play();
+                    } else {
+                        track.audioElement.pause();
+                    }
+                } catch {}
+            };
+            if (track.audioElement.readyState >= 1) {
+                startAndPlay();
+            } else {
+                const onReady = () => {
+                    track.audioElement.removeEventListener('loadedmetadata', onReady);
+                    track.audioElement.removeEventListener('canplay', onReady);
+                    startAndPlay();
+                };
+                track.audioElement.addEventListener('loadedmetadata', onReady, { once: true });
+                track.audioElement.addEventListener('canplay', onReady, { once: true });
             }
         });
     }
@@ -605,11 +665,25 @@ class TimelineEditor {
         
         // Update all track positions
         this.tracks.forEach(track => {
-            if (track.audioElement) {
-                const trackTime = this.playheadPosition - (track.start_time || 0);
-                if (trackTime >= 0 && trackTime < track.audioElement.duration) {
-                    track.audioElement.currentTime = trackTime;
-                }
+            if (!track.audioElement) return;
+            const desired = this.playheadPosition - (track.start_time || 0);
+            const setTime = () => {
+                try {
+                    if (desired >= 0 && desired < (track.audioElement.duration || Infinity)) {
+                        track.audioElement.currentTime = desired;
+                    }
+                } catch {}
+            };
+            if (track.audioElement.readyState >= 1) {
+                setTime();
+            } else {
+                const onReady = () => {
+                    track.audioElement.removeEventListener('loadedmetadata', onReady);
+                    track.audioElement.removeEventListener('canplay', onReady);
+                    setTime();
+                };
+                track.audioElement.addEventListener('loadedmetadata', onReady, { once: true });
+                track.audioElement.addEventListener('canplay', onReady, { once: true });
             }
         });
         
@@ -727,6 +801,31 @@ class TimelineEditor {
         const mixer = this.elements.tracksMixer;
         if (!mixer) return;
         mixer.innerHTML = '';
+        // Add speech volume control (0..2)
+        const speechItem = document.createElement('div');
+        speechItem.className = 'mixer-item';
+        const speechLabel = document.createElement('span');
+        speechLabel.className = 'mixer-label';
+        speechLabel.textContent = 'Речь';
+        const speechSlider = document.createElement('input');
+        speechSlider.type = 'range';
+        speechSlider.className = 'volume-slider';
+        speechSlider.min = '0';
+        speechSlider.max = '2';
+        speechSlider.step = '0.01';
+        speechSlider.value = (this._speechGainNode ? this._speechGainNode.gain.value : 1.0).toString();
+        speechSlider.addEventListener('input', (e) => {
+            const vol = parseFloat(e.target.value);
+            if (this._speechGainNode) {
+                this._speechGainNode.gain.value = isFinite(vol) ? vol : 1.0;
+            } else if (this.audioElement) {
+                // Fallback: scale to 0..1
+                this.audioElement.volume = Math.max(0, Math.min(1, vol / 2));
+            }
+        });
+        speechItem.appendChild(speechLabel);
+        speechItem.appendChild(speechSlider);
+        mixer.appendChild(speechItem);
         this.tracks.forEach(track => {
             const item = document.createElement('div');
             item.className = 'mixer-item';
@@ -743,10 +842,7 @@ class TimelineEditor {
             slider.addEventListener('input', (e) => {
                 const vol = parseFloat(e.target.value);
                 track.volume = vol;
-                if (track.id === 'speech' && this.audioElement) {
-                    // Управляем громкостью основного аудио речи в превью
-                    this.audioElement.volume = vol;
-                } else if (track.audioElement) {
+                if (track.audioElement) {
                     track.audioElement.volume = vol;
                 }
             });
