@@ -103,3 +103,5 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+/migrate_cache.sh
