@@ -52,6 +52,7 @@ class TimelineEditor {
             selectionCount: document.getElementById('selection-count'),
             generateMusicBtn: document.getElementById('btn-generate-music'),
             generateFoliBtn: document.getElementById('btn-generate-foli'),
+            foliChannelSelect: document.getElementById('foli-channel-select'),
             clearSelectionBtn: document.getElementById('btn-clear-selection'),
             timelineContainer: document.getElementById('timeline-container'),
             timeRuler: document.getElementById('time-ruler'),
@@ -133,6 +134,14 @@ class TimelineEditor {
                         <span class="selection-count" id="selection-count">0 сегментов выбрано</span>
                         <span class="selection-details" id="selection-details"></span>
                         <button class="btn-generate-music" id="btn-generate-music">🎵 Генерировать музыку</button>
+                        <div class="foli-channel-select-wrap" style="display:flex;align-items:center;gap:6px;">
+                            <label for="foli-channel-select">Канал:</label>
+                            <select id="foli-channel-select">
+                                <option value="ch1">ch1</option>
+                                <option value="ch2">ch2</option>
+                                <option value="ch3">ch3</option>
+                            </select>
+                        </div>
                         <button class="btn-generate-foli" id="btn-generate-foli">🔊 Генерировать фоли</button>
                         <button class="btn-clear-selection" id="btn-clear-selection">✕ Очистить</button>
                     </div>
@@ -162,6 +171,7 @@ class TimelineEditor {
             selectionCount: document.getElementById('selection-count'),
             generateMusicBtn: document.getElementById('btn-generate-music'),
             generateFoliBtn: document.getElementById('btn-generate-foli'),
+            foliChannelSelect: document.getElementById('foli-channel-select'),
             clearSelectionBtn: document.getElementById('btn-clear-selection'),
             timelineContainer: document.getElementById('timeline-container'),
             timeRuler: document.getElementById('time-ruler'),
@@ -418,6 +428,8 @@ class TimelineEditor {
             const color = this.getEmotionColor(emotion);
             const left = this.timeToPixels(segment.start);
             const width = this.timeToPixels(segment.end - segment.start);
+            const foli = segment.foli_class;
+            const foliConf = segment.foli_confidence;
             
             const block = document.createElement('div');
             block.className = 'emotion-block';
@@ -426,11 +438,23 @@ class TimelineEditor {
             block.style.backgroundColor = color;
             block.style.opacity = 0.6;
             block.dataset.segmentId = idx;
-            block.title = `${emotion} (${(segment.emotion_confidence * 100).toFixed(0)}%)`;
+            const emoStr = `${emotion} (${Math.round((segment.emotion_confidence || 0) * 100)}%)`;
+            // Формируем строку фоли с учётом каналов
+            let foliStr = '';
+            if (segment.foli && typeof segment.foli === 'object') {
+                const parts = [];
+                if (segment.foli.ch1?.class) parts.push(`ch1: ${segment.foli.ch1.class}`);
+                if (segment.foli.ch2?.class) parts.push(`ch2: ${segment.foli.ch2.class}`);
+                if (segment.foli.ch3?.class) parts.push(`ch3: ${segment.foli.ch3.class}`);
+                if (parts.length) foliStr = ` • Фоли: ${parts.join(', ')}`;
+            } else if (foli) {
+                foliStr = ` • Фоли: ${foli}${typeof foliConf === 'number' ? ` (${Math.round(foliConf * 100)}%)` : ''}`;
+            }
+            block.title = `Эмоция: ${emoStr}${foliStr}`;
             
             block.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.toggleSegmentSelection(idx);
+                this.handleSegmentClick(e, idx);
             });
             
             layer.appendChild(block);
@@ -630,6 +654,29 @@ class TimelineEditor {
         this.updateSelectionUI();
     }
     
+    handleSegmentClick(event, segmentId) {
+        // Cmd/Ctrl+Click -> toggle add/remove
+        if (event.metaKey || event.ctrlKey) {
+            this.toggleSegmentSelection(segmentId);
+            this._lastSelectedSegmentIndex = segmentId;
+            return;
+        }
+        // Shift+Click -> select range from last anchor
+        if (event.shiftKey) {
+            const anchor = (typeof this._lastSelectedSegmentIndex === 'number') ? this._lastSelectedSegmentIndex : segmentId;
+            const [start, end] = anchor <= segmentId ? [anchor, segmentId] : [segmentId, anchor];
+            this.selectedSegments.clear();
+            for (let i = start; i <= end; i++) this.selectedSegments.add(i);
+            this.updateSelectionUI();
+            return;
+        }
+        // Plain click -> single selection
+        this.selectedSegments.clear();
+        this.selectedSegments.add(segmentId);
+        this._lastSelectedSegmentIndex = segmentId;
+        this.updateSelectionUI();
+    }
+    
     clearSelection() {
         this.selectedSegments.clear();
         this.updateSelectionUI();
@@ -644,8 +691,18 @@ class TimelineEditor {
                 const segId = Array.from(this.selectedSegments)[0];
                 const seg = this.segments[segId];
                 const emotion = seg?.emotion || '—';
-                const foli = seg?.foli_class || '—';
-                this.elements.selectionDetails.textContent = `Эмоция: ${emotion} | Фоли: ${foli}`;
+                // Резюме по каналам фоли
+                let foliSummary = '—';
+                if (seg?.foli && typeof seg.foli === 'object') {
+                    const parts = [];
+                    if (seg.foli.ch1?.class) parts.push(`ch1=${seg.foli.ch1.class}`);
+                    if (seg.foli.ch2?.class) parts.push(`ch2=${seg.foli.ch2.class}`);
+                    if (seg.foli.ch3?.class) parts.push(`ch3=${seg.foli.ch3.class}`);
+                    foliSummary = parts.length ? parts.join(', ') : '—';
+                } else if (seg?.foli_class) {
+                    foliSummary = seg.foli_class;
+                }
+                this.elements.selectionDetails.textContent = `Эмоция: ${emotion} | Фоли: ${foliSummary}`;
             } else if (this.elements.selectionDetails) {
                 this.elements.selectionDetails.textContent = '';
             }
@@ -686,7 +743,10 @@ class TimelineEditor {
             slider.addEventListener('input', (e) => {
                 const vol = parseFloat(e.target.value);
                 track.volume = vol;
-                if (track.audioElement) {
+                if (track.id === 'speech' && this.audioElement) {
+                    // Управляем громкостью основного аудио речи в превью
+                    this.audioElement.volume = vol;
+                } else if (track.audioElement) {
                     track.audioElement.volume = vol;
                 }
             });
@@ -702,8 +762,28 @@ class TimelineEditor {
             return;
         }
         
-        const segmentIds = Array.from(this.selectedSegments);
+        let segmentIds = Array.from(this.selectedSegments);
         const jobId = this.projectData.job_id;
+        let selectedChannel = undefined;
+        if (type === 'foli') {
+            selectedChannel = (this.elements.foliChannelSelect?.value || 'ch1');
+            // Filter out segments where selected channel is Silence or missing
+            const beforeCount = segmentIds.length;
+            segmentIds = segmentIds.filter(id => {
+                const seg = this.segments[id];
+                const ch = seg?.foli?.[selectedChannel];
+                const label = ch?.class || seg?.foli_class;
+                return label && String(label).toLowerCase() !== 'silence';
+            });
+            if (segmentIds.length === 0) {
+                alert('Нет сегментов для генерации: выбранный канал = Silence во всех выделенных сегментах');
+                return;
+            }
+            if (segmentIds.length < beforeCount) {
+                // Optional info
+                console.info(`Пропущено ${beforeCount - segmentIds.length} сегмент(ов) с каналом Silence`);
+            }
+        }
         
         // Show loading state
         const generateBtn = type === 'music' ? this.elements.generateMusicBtn : this.elements.generateFoliBtn;
@@ -718,7 +798,8 @@ class TimelineEditor {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     segment_ids: segmentIds,
-                    type: type
+                    type: type,
+                    foli_channel: selectedChannel
                 })
             });
             

@@ -217,6 +217,8 @@ class SegmentFoli:
     foli_class: Optional[str] = None
     foli_confidence: Optional[float] = None
     top5: List[Dict[str, Any]] = field(default_factory=list)
+    # New: full per-channel predictions (ch1/ch2/ch3)
+    channels: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -227,6 +229,7 @@ class SegmentFoli:
             "foli_class": self.foli_class,
             "foli_confidence": self.foli_confidence,
             "top5": self.top5,
+            "channels": self.channels,
         }
 
 

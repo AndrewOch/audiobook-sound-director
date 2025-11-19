@@ -16,6 +16,7 @@ import logging
 import time
 import importlib
 from datetime import datetime
+import re
 
 from .dto import (
     InputRequest,
@@ -247,6 +248,79 @@ class PipelineService:
                 message=str(e),
             )
 
+    # -----------------------------
+    # Segment utilities (merge for classification context)
+    # -----------------------------
+    @staticmethod
+    def _ends_with_sentence_terminator(text: str) -> bool:
+        if not text:
+            return False
+        t = str(text).strip()
+        # Allow trailing quotes/brackets after terminator
+        return bool(re.search(r'[.!?…]+["»\')\]]*$', t))
+
+    def _merge_transcript_segments(self, segments: List["TranscriptSegment"], max_gap_s: float = 0.5):
+        """
+        Merge adjacent Whisper segments for richer context if:
+        - previous segment does NOT end with sentence terminator
+        - and the gap to the next segment is less than max_gap_s.
+        Returns a list of merged groups with mapping to original indices.
+        """
+        merged = []
+        if not segments:
+            return merged
+        # Initialize first group
+        current = {
+            "original_ids": [0],
+            "start": float(segments[0].start),
+            "end": float(segments[0].end),
+            "text": (segments[0].text or "").strip(),
+        }
+        for i in range(len(segments) - 1):
+            cur_seg = segments[i]
+            nxt_seg = segments[i + 1]
+            gap = float(nxt_seg.start) - float(cur_seg.end)
+            # Merge condition
+            if (not self._ends_with_sentence_terminator(cur_seg.text)) and (gap < max_gap_s):
+                current["original_ids"].append(i + 1)
+                current["end"] = float(nxt_seg.end)
+                # Concatenate with space
+                nxt_text = (nxt_seg.text or "").strip()
+                if nxt_text:
+                    if current["text"]:
+                        current["text"] += " " + nxt_text
+                    else:
+                        current["text"] = nxt_text
+            else:
+                merged.append(current)
+                current = {
+                    "original_ids": [i + 1],
+                    "start": float(nxt_seg.start),
+                    "end": float(nxt_seg.end),
+                    "text": (nxt_seg.text or "").strip(),
+                }
+        merged.append(current)
+        return merged
+    
+    def _write_transcript_merged(self, job: JobInfo, merged_groups: List[Dict]) -> None:
+        """Persist merged transcript to transcript_merged.json for UI."""
+        try:
+            payload = {
+                "segments": [
+                    {
+                        "text": g.get("text", ""),
+                        "start": float(g.get("start", 0.0)),
+                        "end": float(g.get("end", 0.0)),
+                        "original_ids": g.get("original_ids", []),
+                    }
+                    for g in merged_groups
+                ]
+            }
+            with open(job.job_dir / "transcript_merged.json", "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.logger.warning("[Job %s] Failed to write transcript_merged.json: %s", job.job_id, e)
+
     def _mark_planned_steps(self, steps: Dict[str, StepStatus]):
         # Emotions
         steps["emotion_analysis"].status = "pending" if self.config.enable_emotions else "skipped"
@@ -274,24 +348,34 @@ class PipelineService:
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(pred, f, ensure_ascii=False, indent=2)
 
-        # Analyze each segment separately
+        # Analyze segments separately with context merging (by merged group index)
         segments_emotions: List[SegmentEmotion] = []
         if ingest_result.segments:
-            self.logger.info("[Job %s] Analyzing emotions for %d segments", job.job_id, len(ingest_result.segments))
-            for idx, segment in enumerate(ingest_result.segments):
-                if segment.text and segment.text.strip():
-                    seg_pred = clf.predict(segment.text)
-                    seg_top5 = seg_pred.get("top5", [])
-                    seg_emotion = SegmentEmotion(
-                        segment_id=idx,
-                        start=segment.start,
-                        end=segment.end,
-                        text=segment.text,
-                        emotion=seg_pred.get("emotion", "neutral"),
-                        confidence=seg_pred.get("confidence", 0.0),
-                        top5=seg_top5,
-                    )
-                    segments_emotions.append(seg_emotion)
+            merged_groups = self._merge_transcript_segments(ingest_result.segments, max_gap_s=0.5)
+            # Save merged transcript for UI
+            self._write_transcript_merged(job, merged_groups)
+            self.logger.info(
+                "[Job %s] Emotion analysis: original segments=%d, merged groups=%d",
+                job.job_id, len(ingest_result.segments), len(merged_groups)
+            )
+            for group_idx, group in enumerate(merged_groups):
+                text = (group.get("text") or "").strip()
+                if not text:
+                    continue
+                seg_pred = clf.predict(text)
+                seg_top5 = seg_pred.get("top5", [])
+                emotion_label = seg_pred.get("emotion", "neutral")
+                confidence = seg_pred.get("confidence", 0.0)
+                # Use merged group index and boundaries
+                segments_emotions.append(SegmentEmotion(
+                    segment_id=group_idx,
+                    start=float(group.get("start", 0.0)),
+                    end=float(group.get("end", 0.0)),
+                    text=text,
+                    emotion=emotion_label,
+                    confidence=confidence,
+                    top5=seg_top5,
+                ))
             
             # Save segment-based emotions
             segments_path = job.job_dir / "segments_emotions.json"
@@ -315,39 +399,53 @@ class PipelineService:
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(pred, f, ensure_ascii=False, indent=2)
 
-        # Classify each segment separately
+        # Classify segments separately with context merging (by merged group index)
         segments_foli: List[SegmentFoli] = []
         if ingest_result.segments:
-            self.logger.info("[Job %s] Classifying foli for %d segments", job.job_id, len(ingest_result.segments))
-            for idx, segment in enumerate(ingest_result.segments):
-                if segment.text and segment.text.strip():
-                    seg_pred = clf.predict(segment.text)
-                    # Extract top class and confidence
-                    top_class = None
-                    top_confidence = None
-                    top5_list = []
-                    
-                    # Handle different prediction formats
-                    if isinstance(seg_pred, dict):
-                        if "class" in seg_pred:
-                            top_class = seg_pred.get("class")
-                            top_confidence = seg_pred.get("prob", seg_pred.get("confidence", 0.0))
-                        elif "top5" in seg_pred and seg_pred["top5"]:
-                            top_item = seg_pred["top5"][0]
-                            top_class = top_item.get("class") or top_item.get("label")
-                            top_confidence = top_item.get("prob") or top_item.get("score", 0.0)
-                            top5_list = seg_pred.get("top5", [])
-                    
-                    seg_foli = SegmentFoli(
-                        segment_id=idx,
-                        start=segment.start,
-                        end=segment.end,
-                        text=segment.text,
-                        foli_class=top_class,
-                        foli_confidence=top_confidence,
-                        top5=top5_list,
-                    )
-                    segments_foli.append(seg_foli)
+            merged_groups = self._merge_transcript_segments(ingest_result.segments, max_gap_s=0.5)
+            # Ensure merged transcript persisted (if not already)
+            self._write_transcript_merged(job, merged_groups)
+            self.logger.info(
+                "[Job %s] Foli classification: original segments=%d, merged groups=%d",
+                job.job_id, len(ingest_result.segments), len(merged_groups)
+            )
+            for group_idx, group in enumerate(merged_groups):
+                text = (group.get("text") or "").strip()
+                if not text:
+                    continue
+                seg_pred = clf.predict(text)
+                # seg_pred is expected to be channels dict {'ch1': {...}, 'ch2': {...}, 'ch3': {...}}
+                channels = seg_pred if isinstance(seg_pred, dict) else {}
+                # Apply confidence threshold: if prob < 0.6 -> Silence
+                norm_channels = {}
+                threshold = 0.6
+                for ch in ("ch1", "ch2", "ch3"):
+                    ch_data = dict((channels.get(ch) or {}))
+                    prob = float(ch_data.get("prob") or ch_data.get("score") or 0.0)
+                    klass = ch_data.get("class") or ch_data.get("label")
+                    if prob < threshold or not klass:
+                        norm_channels[ch] = {
+                            "class": "Silence",
+                            "prob": prob,
+                            "top5": ch_data.get("top5", []),
+                        }
+                    else:
+                        norm_channels[ch] = {
+                            "class": klass,
+                            "prob": prob,
+                            "top5": ch_data.get("top5", []),
+                        }
+                ch1 = norm_channels.get("ch1") or {}
+                segments_foli.append(SegmentFoli(
+                    segment_id=group_idx,
+                    start=float(group.get("start", 0.0)),
+                    end=float(group.get("end", 0.0)),
+                    text=text,
+                    foli_class=ch1.get("class"),
+                    foli_confidence=ch1.get("prob") or ch1.get("score"),
+                    top5=ch1.get("top5", []),
+                    channels=norm_channels,
+                ))
             
             # Save segment-based foli classifications
             segments_path = job.job_dir / "segments_foli.json"

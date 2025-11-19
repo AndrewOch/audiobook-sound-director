@@ -54,7 +54,7 @@ class AudioLDM2Model:
         )
 
         logger.info("Модель загружена, перемещение на устройство...")
-        
+
         # Move to device
         self.pipe = self.pipe.to(self.device)
         

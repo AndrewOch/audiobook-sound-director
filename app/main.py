@@ -410,8 +410,10 @@ async def get_project(job_id: str):
     
     import json as _json
     
-    # Load transcript with segments
-    transcript_path = job_dir / "transcript.json"
+    # Load transcript with segments (prefer merged)
+    transcript_path = job_dir / "transcript_merged.json"
+    if not transcript_path.exists():
+        transcript_path = job_dir / "transcript.json"
     segments = []
     duration = 0.0
     if transcript_path.exists():
@@ -441,8 +443,8 @@ async def get_project(job_id: str):
     # Merge segments with emotions and foli
     enriched_segments = []
     for idx, seg in enumerate(segments):
-        # Use index as segment_id if not present
-        seg_id = seg.get("id", idx)
+        # Use merged index as segment_id
+        seg_id = idx
         enriched_seg = {
             "id": idx,  # Always use index for frontend
             "start": seg.get("start", 0.0),
@@ -452,6 +454,7 @@ async def get_project(job_id: str):
             "emotion_confidence": segments_emotions.get(seg_id, {}).get("confidence", 0.0),
             "foli_class": segments_foli.get(seg_id, {}).get("foli_class"),
             "foli_confidence": segments_foli.get(seg_id, {}).get("foli_confidence"),
+            "foli": segments_foli.get(seg_id, {}).get("channels"),
         }
         enriched_segments.append(enriched_seg)
     
@@ -488,8 +491,10 @@ async def get_segments(job_id: str):
     
     import json as _json
     
-    # Load transcript
-    transcript_path = job_dir / "transcript.json"
+    # Load transcript (prefer merged)
+    transcript_path = job_dir / "transcript_merged.json"
+    if not transcript_path.exists():
+        transcript_path = job_dir / "transcript.json"
     if not transcript_path.exists():
         raise HTTPException(status_code=404, detail="Transcript not found")
     
@@ -527,6 +532,7 @@ async def get_segments(job_id: str):
             "emotion_confidence": segments_emotions.get(idx, {}).get("confidence", 0.0),
             "foli_class": segments_foli.get(idx, {}).get("foli_class"),
             "foli_confidence": segments_foli.get(idx, {}).get("foli_confidence"),
+            "foli": segments_foli.get(idx, {}).get("channels"),
         }
         enriched_segments.append(enriched_seg)
     
@@ -650,8 +656,10 @@ async def generate_segments(job_id: str, request: Request):
         
         import json as _json
         
-        # Load segments with emotions/foli
-        transcript_path = job_dir / "transcript.json"
+        # Load segments with emotions/foli (prefer merged transcript)
+        transcript_path = job_dir / "transcript_merged.json"
+        if not transcript_path.exists():
+            transcript_path = job_dir / "transcript.json"
         segments_emotions_path = job_dir / "segments_emotions.json"
         segments_foli_path = job_dir / "segments_foli.json"
         
@@ -714,7 +722,9 @@ async def generate_segments(job_id: str, request: Request):
                 foli_gen = FoliGenerator(FoliGenConfig())
                 foli_gen.load_model()
                 
-                prompt = f"The sound of {seg_foli.get('foli_class', 'ambient background')}. High quality, clear."
+                # Legacy path: use ch1 if channels present
+                ch_label = (seg_foli.get('channels') or {}).get('ch1', {}).get('class') or seg_foli.get('foli_class') or 'ambient background'
+                prompt = f"The sound of {ch_label}. High quality, clear."
                 duration = seg.get("end", 0.0) - seg.get("start", 0.0)
                 duration = max(5.0, min(duration, 30.0))
                 
@@ -722,13 +732,13 @@ async def generate_segments(job_id: str, request: Request):
                     prompt=prompt,
                     audio_length_in_s=duration,
                 )
-                output_path = job_dir / f"foli_segment_{seg_id}.wav"
+                output_path = job_dir / f"foli_segment_{seg_id}_ch1.wav"
                 foli_gen.save_audio(audio, output_path)
                 
                 generated_tracks.append({
-                    "id": f"foli_segment_{seg_id}",
+                    "id": f"foli_segment_{seg_id}_ch1",
                     "type": "background",
-                    "url": f"/output/{job_id}/foli_segment_{seg_id}.wav",
+                    "url": f"/output/{job_id}/foli_segment_{seg_id}_ch1.wav",
                     "start_time": seg.get("start", 0.0),
                     "volume": 0.6,
                     "enabled": True,
@@ -853,8 +863,10 @@ def _run_generation_task(job_id: str, job_dir: Path, task_id: str, kind: str, se
             "message": "Starting",
             "created_at": datetime.now().isoformat()
         })
-        # Load segment data
-        transcript_path = job_dir / "transcript.json"
+        # Load segment data (prefer merged)
+        transcript_path = job_dir / "transcript_merged.json"
+        if not transcript_path.exists():
+            transcript_path = job_dir / "transcript.json"
         segments_emotions_path = job_dir / "segments_emotions.json"
         segments_foli_path = job_dir / "segments_foli.json"
         transcript = _read_json(transcript_path, default={"segments": []})
@@ -901,15 +913,31 @@ def _run_generation_task(job_id: str, job_dir: Path, task_id: str, kind: str, se
                 })
             else:
                 ff = seg_foli.get(seg_id, {})
-                label = ff.get("foli_class", "ambient background")
+                # Determine channel for prompt
+                tasks_state_here = _read_json(tasks_path, default={})
+                channel = tasks_state_here.get(task_id, {}).get("foli_channel") or "ch1"
+                channels = ff.get("channels") or {}
+                label = (channels.get(channel) or {}).get("class") or ff.get("foli_class") or "ambient background"
+                # Skip generation if channel is Silence
+                if isinstance(label, str) and label.lower() == "silence":
+                    update({
+                        "task_id": task_id,
+                        "type": kind,
+                        "segment_ids": segment_ids,
+                        "state": "running",
+                        "progress": int(((idx + 1) / total) * 100),
+                        "message": f"Skipped seg {seg_id} ({channel}=Silence)",
+                        "created_at": tasks_state.get(task_id, {}).get("created_at"),
+                    })
+                    continue
                 prompt = f"The sound of {label}. High quality, clear."
                 audio = foli_gen.generate(prompt=prompt, audio_length_in_s=duration)
-                out_path = job_dir / f"foli_segment_{seg_id}.wav"
+                out_path = job_dir / f"foli_segment_{seg_id}_{channel}.wav"
                 foli_gen.save_audio(audio, out_path)
                 generated_tracks.append({
-                    "id": f"foli_segment_{seg_id}",
+                    "id": f"foli_segment_{seg_id}_{channel}",
                     "type": "background",
-                    "url": f"/output/{job_id}/foli_segment_{seg_id}.wav",
+                    "url": f"/output/{job_id}/foli_segment_{seg_id}_{channel}.wav",
                     "start_time": start_time,
                     "volume": 0.6,
                     "enabled": True,
@@ -955,6 +983,7 @@ async def create_generation_task(job_id: str, request: Request, background_tasks
         payload = await request.json()
         segment_ids = payload.get("segment_ids", [])
         kind = payload.get("type", "music")
+        foli_channel = payload.get("foli_channel")
         if not segment_ids:
             raise HTTPException(status_code=400, detail="segment_ids is required")
         job_dir = OUTPUT_DIR / job_id
@@ -972,6 +1001,7 @@ async def create_generation_task(job_id: str, request: Request, background_tasks
             "progress": 0,
             "message": "Queued",
             "created_at": datetime.now().isoformat(),
+            "foli_channel": foli_channel,
         }
         _write_json(tasks_path, tasks_state)
         # enqueue background processing

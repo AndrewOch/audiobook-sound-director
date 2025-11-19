@@ -29,7 +29,7 @@ class RecognizerConfig:
     
     # Whisper model size
     # Options: 'tiny', 'base', 'small', 'medium', 'large'
-    model_size: Literal['tiny', 'base', 'small', 'medium', 'large'] = 'base'
+    model_size: Literal['tiny', 'base', 'small', 'medium', 'large'] = 'small'
     
     # Language (None for auto-detection)
     language: Optional[str] = 'ru'
