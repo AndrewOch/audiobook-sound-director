@@ -41,22 +41,19 @@ class TimelineEditor {
         this.elements = {
             playBtn: document.getElementById('timeline-play-btn'),
             pauseBtn: document.getElementById('timeline-pause-btn'),
-                beginBtn: document.getElementById('timeline-begin'),
-                rewindBtn: document.getElementById('timeline-rewind'),
-                forwardBtn: document.getElementById('timeline-forward'),
-                endBtn: document.getElementById('timeline-end'),
+            beginBtn: document.getElementById('timeline-begin'),
+            rewindBtn: document.getElementById('timeline-rewind'),
+            forwardBtn: document.getElementById('timeline-forward'),
+            endBtn: document.getElementById('timeline-end'),
             timeInput: document.getElementById('timeline-time-input'),
             timeDisplay: document.getElementById('timeline-time-display'),
             zoomOut: document.getElementById('timeline-zoom-out'),
             zoomIn: document.getElementById('timeline-zoom-in'),
             zoomLevel: document.getElementById('timeline-zoom-level'),
-            saveBtn: document.getElementById('timeline-save-btn'),
-            openBtn: document.getElementById('timeline-open-btn'),
             selectionActions: document.getElementById('selection-actions'),
             selectionCount: document.getElementById('selection-count'),
             generateMusicBtn: document.getElementById('btn-generate-music'),
             generateFoliBtn: document.getElementById('btn-generate-foli'),
-            foliChannelSelect: document.getElementById('foli-channel-select'),
             clearSelectionBtn: document.getElementById('btn-clear-selection'),
             timelineContainer: document.getElementById('timeline-container'),
             timeRuler: document.getElementById('time-ruler'),
@@ -70,6 +67,19 @@ class TimelineEditor {
             bottomActions: document.getElementById('bottom-actions'),
             tracksMixer: document.getElementById('tracks-mixer'),
             selectionDetails: document.getElementById('selection-details'),
+            // toggles and panels
+            selectionPanelToggle: document.getElementById('selection-panel-toggle'),
+            selectionPanel: document.getElementById('selection-panel'),
+            musicPanelToggle: document.getElementById('music-panel-toggle'),
+            musicPanel: document.getElementById('music-panel'),
+            foliPanelToggle: document.getElementById('foli-panel-toggle'),
+            foliPanel: document.getElementById('foli-panel'),
+            // controls
+            musicLenInput: document.getElementById('music-length-seconds'),
+            musicFadeLeftSelect: document.getElementById('music-transition-left'),
+            musicFadeRightSelect: document.getElementById('music-transition-right'),
+            statusLine: document.getElementById('status-line'),
+            selectionInfoTable: document.getElementById('selection-info-table'),
         };
         this.setupEventListeners();
     }
@@ -110,13 +120,8 @@ class TimelineEditor {
                         <span class="zoom-level" id="timeline-zoom-level">100%</span>
                         <button class="btn-zoom-in" id="timeline-zoom-in">+</button>
                     </div>
-                    <div class="toolbar-right">
-                        <button class="btn-save" id="timeline-save-btn">💾 Сохранить</button>
-                        <button class="btn-open" id="timeline-open-btn">📂 Открыть</button>
-                    </div>
+                    <div class="toolbar-right"></div>
                 </div>
-                
-                <!-- Selection Actions moved to bottom panel -->
                 
                 <!-- Timeline Container -->
                 <div class="timeline-container" id="timeline-container">
@@ -133,9 +138,9 @@ class TimelineEditor {
                             <div class="track-content">
                                 <canvas id="waveform-canvas"></canvas>
                                 <div class="emotion-layer" id="emotion-layer"></div>
-                                <div class="playhead" id="playhead"></div>
                             </div>
                         </div>
+                        <div class="playhead" id="playhead" title="Перетащите для перемотки"></div>
                         
                         <!-- Generated Tracks -->
                         <div class="tracks-list" id="tracks-list"></div>
@@ -145,24 +150,71 @@ class TimelineEditor {
 
                 <!-- Bottom Actions Panel -->
                 <div class="bottom-actions" id="bottom-actions">
-                    <!-- Selection section -->
-                    <div class="selection-actions" id="selection-actions" style="display: none;">
-                        <span class="selection-count" id="selection-count">0 сегментов выбрано</span>
-                        <span class="selection-details" id="selection-details"></span>
-                        <button class="btn-generate-music" id="btn-generate-music">🎵 Генерировать музыку</button>
-                        <div class="foli-channel-select-wrap" style="display:flex;align-items:center;gap:6px;">
-                            <label for="foli-channel-select">Канал:</label>
-                            <select id="foli-channel-select">
-                                <option value="ch1">ch1</option>
-                                <option value="ch2">ch2</option>
-                                <option value="ch3">ch3</option>
-                            </select>
+                    <div class="ba-column">
+                        <div class="panel">
+                            <div class="panel-title with-toggle">
+                                <button type="button" id="selection-panel-toggle" class="panel-toggle">Выделение</button>
+                            </div>
+                            <div class="panel-body" id="selection-panel">
+                                <div class="selection-actions" id="selection-actions" style="display: none;">
+                                    <span class="selection-count" id="selection-count">0 сегментов выбрано</span>
+                                    <button class="btn-clear-selection" id="btn-clear-selection">✕ Очистить</button>
+                                </div>
+                                <table class="mini-table" id="selection-info-table"></table>
+                                <div id="status-line" class="status-line"></div>
+                            </div>
                         </div>
-                        <button class="btn-generate-foli" id="btn-generate-foli">🔊 Генерировать фоли</button>
-                        <button class="btn-clear-selection" id="btn-clear-selection">✕ Очистить</button>
+                        <div class="panel">
+                            <div class="panel-title with-toggle">
+                                <button type="button" id="music-panel-toggle" class="panel-toggle">Генерация музыки</button>
+                            </div>
+                            <div class="panel-body" id="music-panel" style="display:none;">
+                                <div class="form-group">
+                                    <label for="music-length-seconds" class="field-label">Длина (сек)</label>
+                                    <input type="number" id="music-length-seconds" min="3" max="300" step="1" value="10" class="w-32 sm:w-40 md:w-48 bg-gray-800 text-gray-100 border border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div class="form-group">
+                                    <label for="music-transition-left" class="field-label">Переход слева</label>
+                                    <select id="music-transition-left" class="w-full sm:w-72 md:w-80 bg-gray-800 text-gray-100 border border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                        <option value="none">Без перехода</option>
+                                        <option value="fade">Плавное затухание</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="music-transition-right" class="field-label">Переход справа</label>
+                                    <select id="music-transition-right" class="w-full sm:w-72 md:w-80 bg-gray-800 text-gray-100 border border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                        <option value="none">Без перехода</option>
+                                        <option value="fade">Плавное затухание</option>
+                                    </select>
+                                </div>
+                                <button class="btn-generate-music" id="btn-generate-music">🎵 Сгенерировать музыку</button>
+                            </div>
+                        </div>
+                        <div class="panel">
+                            <div class="panel-title with-toggle">
+                                <button type="button" id="foli-panel-toggle" class="panel-toggle">Генерация фоновых звуков</button>
+                            </div>
+                            <div class="panel-body" id="foli-panel" style="display:none;">
+                                <div class="form-group">
+                                    <label class="field-label">Каналы</label>
+                                    <div class="flex items-center gap-4 flex-wrap">
+                                        <label class="inline-flex items-center gap-2 text-gray-100"><input type="checkbox" name="foli-channel" value="ch1" checked class="accent-indigo-500"> <span>Акцентный</span></label>
+                                        <label class="inline-flex items-center gap-2 text-gray-100"><input type="checkbox" name="foli-channel" value="ch2" class="accent-indigo-500"> <span>Фоновый</span></label>
+                                        <label class="inline-flex items-center gap-2 text-gray-100"><input type="checkbox" name="foli-channel" value="ch3" class="accent-indigo-500"> <span>Вторичный</span></label>
+                                    </div>
+                                </div>
+                                <button class="btn-generate-foli" id="btn-generate-foli">🔊 Сгенерировать фоли</button>
+                            </div>
+                        </div>
                     </div>
-                    <!-- Tracks mixer section -->
-                    <div class="tracks-mixer" id="tracks-mixer"></div>
+                    <div class="ba-column">
+                        <div class="panel">
+                            <div class="panel-title">Громкость дорожек</div>
+                            <div class="panel-body">
+                                <div class="tracks-mixer" id="tracks-mixer"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
         `;
         this.container.appendChild(editorDiv);
@@ -181,13 +233,10 @@ class TimelineEditor {
             zoomOut: document.getElementById('timeline-zoom-out'),
             zoomIn: document.getElementById('timeline-zoom-in'),
             zoomLevel: document.getElementById('timeline-zoom-level'),
-            saveBtn: document.getElementById('timeline-save-btn'),
-            openBtn: document.getElementById('timeline-open-btn'),
             selectionActions: document.getElementById('selection-actions'),
             selectionCount: document.getElementById('selection-count'),
             generateMusicBtn: document.getElementById('btn-generate-music'),
             generateFoliBtn: document.getElementById('btn-generate-foli'),
-            foliChannelSelect: document.getElementById('foli-channel-select'),
             clearSelectionBtn: document.getElementById('btn-clear-selection'),
             timelineContainer: document.getElementById('timeline-container'),
             timeRuler: document.getElementById('time-ruler'),
@@ -201,6 +250,16 @@ class TimelineEditor {
             bottomActions: document.getElementById('bottom-actions'),
             tracksMixer: document.getElementById('tracks-mixer'),
             selectionDetails: document.getElementById('selection-details'),
+            // new elements
+            musicPanelToggle: document.getElementById('music-panel-toggle'),
+            musicPanel: document.getElementById('music-panel'),
+            foliPanelToggle: document.getElementById('foli-panel-toggle'),
+            foliPanel: document.getElementById('foli-panel'),
+            musicLenInput: document.getElementById('music-length-seconds'),
+            musicFadeLeftSelect: document.getElementById('music-transition-left'),
+            musicFadeRightSelect: document.getElementById('music-transition-right'),
+            statusLine: document.getElementById('status-line'),
+            selectionInfoTable: document.getElementById('selection-info-table'),
         };
         
         // Verify all elements are found
@@ -233,14 +292,21 @@ class TimelineEditor {
         if (this.elements.rewindBtn) this.elements.rewindBtn.addEventListener('click', () => this.seekTo(Math.max(0, (this.playheadPosition - 10))));
         if (this.elements.forwardBtn) this.elements.forwardBtn.addEventListener('click', () => this.seekTo(Math.min((this.projectData?.duration || 0), (this.playheadPosition + 10))));
         
+        // Panels toggles
+        if (this.elements.selectionPanelToggle) this.elements.selectionPanelToggle.addEventListener('click', () => {
+            const el = this.elements.selectionPanel; if (!el) return; el.style.display = (el.style.display === 'none' ? 'block' : 'none');
+        });
+        if (this.elements.musicPanelToggle) this.elements.musicPanelToggle.addEventListener('click', () => {
+            const el = this.elements.musicPanel; if (!el) return; el.style.display = (el.style.display === 'none' ? 'block' : 'none');
+        });
+        if (this.elements.foliPanelToggle) this.elements.foliPanelToggle.addEventListener('click', () => {
+            const el = this.elements.foliPanel; if (!el) return; el.style.display = (el.style.display === 'none' ? 'block' : 'none');
+        });
+        
         // Selection actions
         if (this.elements.generateMusicBtn) this.elements.generateMusicBtn.addEventListener('click', () => this.generateForSelection('music'));
         if (this.elements.generateFoliBtn) this.elements.generateFoliBtn.addEventListener('click', () => this.generateForSelection('foli'));
         if (this.elements.clearSelectionBtn) this.elements.clearSelectionBtn.addEventListener('click', () => this.clearSelection());
-        
-        // Save/Open
-        if (this.elements.saveBtn) this.elements.saveBtn.addEventListener('click', () => this.saveProject());
-        if (this.elements.openBtn) this.elements.openBtn.addEventListener('click', () => this.openProjectDialog());
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
@@ -259,16 +325,40 @@ class TimelineEditor {
             }
         });
         
-        // Click on timeline to seek
+        // Click on timeline to seek (consider label width)
         if (this.elements.tracksArea) {
             this.elements.tracksArea.addEventListener('click', (e) => {
                 if (e.target === this.elements.tracksArea || e.target.closest('.track-content')) {
                     const rect = this.elements.tracksArea.getBoundingClientRect();
                     const x = e.clientX - rect.left;
-                    const time = this.pixelsToTime(x);
+                    const labelW = this.getLabelWidth();
+                    const time = this.pixelsToTime(Math.max(0, x - labelW));
                     this.seekTo(time);
                 }
             });
+        }
+        
+        // Drag playhead by head
+        if (this.elements.playhead) {
+            let dragging = false;
+            const onDown = (e) => { dragging = true; e.preventDefault(); };
+            const onMove = (e) => {
+                if (!dragging) return;
+                const rect = this.elements.tracksArea.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const time = this.pixelsToTime(Math.max(0, x - this.getLabelWidth()));
+                this.seekTo(time);
+            };
+            const onUp = () => { dragging = false; };
+            this.elements.playhead.addEventListener('mousedown', onDown);
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+        }
+        
+        // Sync waveform on scroll/resize
+        if (this.elements.timelineContainer) {
+            this.elements.timelineContainer.addEventListener('scroll', () => this.renderWaveformViewport());
+            window.addEventListener('resize', () => { this.updateScrollableWidths(); this.renderWaveformViewport(); });
         }
     }
     
@@ -335,6 +425,7 @@ class TimelineEditor {
         
         canvas.width = width;
         canvas.height = height;
+        canvas.style.width = `${width}px`;
         
         // Show loading state (only viewport to reduce work)
         ctx.fillStyle = '#1a1a1a';
@@ -361,12 +452,15 @@ class TimelineEditor {
                 height
             };
             
+            // Expand content widths to match duration
+            this.updateScrollableWidths();
+            
             // Render only visible viewport
             this.renderWaveformViewport();
             
             // Attach scroll/resize listeners for lazy rendering
             const onScroll = () => this.renderWaveformViewport();
-            const onResize = () => this.renderWaveformViewport();
+            const onResize = () => { this.updateScrollableWidths(); this.renderWaveformViewport(); };
             if (!this._waveformListenersAttached) {
                 this.elements.timelineContainer.addEventListener('scroll', onScroll);
                 window.addEventListener('resize', onResize);
@@ -381,6 +475,21 @@ class TimelineEditor {
             ctx.font = '12px Arial';
             ctx.textAlign = 'center';
             ctx.fillText('Waveform недоступен', width / 2, height / 2);
+        }
+    }
+
+    updateScrollableWidths() {
+        const duration = this.projectData?.duration || 0;
+        const w = this.timeToPixels(duration);
+        if (this.elements.rulerCanvas) this.elements.rulerCanvas.style.width = `${w}px`;
+        const speechContent = this.elements.speechTrack && this.elements.speechTrack.querySelector('.track-content');
+        if (speechContent) speechContent.style.width = `${w}px`;
+        if (this.elements.emotionLayer) this.elements.emotionLayer.style.width = `${w}px`;
+        // Set width for each track-content
+        if (this.elements.tracksList) {
+            this.elements.tracksList.querySelectorAll('.track .track-content').forEach(el => {
+                el.style.width = `${w}px`;
+            });
         }
     }
 
@@ -423,6 +532,7 @@ class TimelineEditor {
     
     render() {
         this.renderTimeRuler();
+        this.updateScrollableWidths();
         this.renderEmotions();
         this.renderTracks();
         this.updatePlayhead();
@@ -433,22 +543,24 @@ class TimelineEditor {
     renderTimeRuler() {
         const canvas = this.elements.rulerCanvas;
         const ctx = canvas.getContext('2d');
-        const width = this.timeToPixels(this.projectData?.duration || 0);
+        const duration = this.projectData?.duration || 0;
+        const contentW = this.timeToPixels(duration);
+        const fullW = this.getLabelWidth() + contentW;
         const height = this.options.headerHeight;
         
-        canvas.width = width;
+        canvas.width = fullW;
         canvas.height = height;
+        canvas.style.width = `${fullW}px`;
         
-        ctx.clearRect(0, 0, width, height);
+        ctx.clearRect(0, 0, fullW, height);
         ctx.strokeStyle = '#666';
         ctx.lineWidth = 1;
         
         // Draw time markers
-        const duration = this.projectData?.duration || 0;
         const interval = this.getTimeInterval();
         
         for (let time = 0; time <= duration; time += interval) {
-            const x = this.timeToPixels(time);
+            const x = this.getLabelWidth() + this.timeToPixels(time);
             ctx.beginPath();
             ctx.moveTo(x, 0);
             ctx.lineTo(x, height);
@@ -483,18 +595,23 @@ class TimelineEditor {
             block.style.opacity = 0.6;
             block.dataset.segmentId = idx;
             const emoStr = `${emotion} (${Math.round((segment.emotion_confidence || 0) * 100)}%)`;
-            // Формируем строку фоли с учётом каналов
+            // Формируем строку фоли с учётом каналов (без Silence)
             let foliStr = '';
             if (segment.foli && typeof segment.foli === 'object') {
                 const parts = [];
-                if (segment.foli.ch1?.class) parts.push(`ch1: ${segment.foli.ch1.class}`);
-                if (segment.foli.ch2?.class) parts.push(`ch2: ${segment.foli.ch2.class}`);
-                if (segment.foli.ch3?.class) parts.push(`ch3: ${segment.foli.ch3.class}`);
+                if (segment.foli.ch1?.class && segment.foli.ch1.class.toLowerCase() !== 'silence') parts.push(`Акцентный: ${segment.foli.ch1.class}`);
+                if (segment.foli.ch2?.class && segment.foli.ch2.class.toLowerCase() !== 'silence') parts.push(`Фоновый: ${segment.foli.ch2.class}`);
+                if (segment.foli.ch3?.class && segment.foli.ch3.class.toLowerCase() !== 'silence') parts.push(`Вторичный: ${segment.foli.ch3.class}`);
                 if (parts.length) foliStr = ` • Фоли: ${parts.join(', ')}`;
             } else if (foli) {
                 foliStr = ` • Фоли: ${foli}${typeof foliConf === 'number' ? ` (${Math.round(foliConf * 100)}%)` : ''}`;
             }
             block.title = `Эмоция: ${emoStr}${foliStr}`;
+            // Внутренняя подпись
+            const label = document.createElement('div');
+            label.className = 'emotion-label';
+            label.textContent = `${emotion}${foliStr ? ' • ' + foliStr.replace(' • ', '') : ''}`;
+            block.appendChild(label);
             
             block.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -513,6 +630,8 @@ class TimelineEditor {
             const trackEl = this.createTrackElement(track);
             tracksList.appendChild(trackEl);
         });
+        // Set track-content width of all tracks to full timeline width
+        this.updateScrollableWidths();
         // Render mixer after tracks are laid out
         this.renderTracksMixer();
     }
@@ -539,7 +658,7 @@ class TimelineEditor {
                 <button class="btn-delete-track" data-track-id="${track.id}">✕</button>
             </div>
             <div class="track-content">
-                <div class="track-block" style="left: ${left}px; width: ${width}px;"></div>
+                <div class="track-block${track.pending ? ' pending' : ''}" style="left: ${left}px; width: ${width}px;" title="${track.pending ? 'Генерация…' : ''}"></div>
             </div>
         `;
         
@@ -561,7 +680,7 @@ class TimelineEditor {
         
         // Setup drag
         const trackBlock = trackDiv.querySelector('.track-block');
-        if (trackBlock) {
+        if (trackBlock && !track.pending) {
             this.setupTrackDrag(trackBlock, track);
         }
         
@@ -574,6 +693,18 @@ class TimelineEditor {
         }
         
         return trackDiv;
+    }
+    
+    updatePendingTrackProgress(trackId, progress, type = 'music') {
+        try {
+            const trackEl = this.elements.tracksList?.querySelector(`.track[data-track-id="${trackId}"]`);
+            if (!trackEl) return;
+            const nameSpan = trackEl.querySelector('.track-label span');
+            if (nameSpan) {
+                const label = (type === 'foli') ? 'Фоли (генерация)…' : 'Музыка (генерация)…';
+                nameSpan.textContent = `${label} ${Math.max(0, Math.min(100, Math.round(progress)))}%`;
+            }
+        } catch {}
     }
     
     setupTrackDrag(trackBlock, track) {
@@ -737,8 +868,9 @@ class TimelineEditor {
     }
     
     updatePlayhead() {
-        const x = this.timeToPixels(this.playheadPosition);
+        const x = this.getLabelWidth() + this.timeToPixels(this.playheadPosition);
         this.elements.playhead.style.left = `${x}px`;
+        this.elements.playhead.style.height = `${this.elements.tracksArea?.scrollHeight || 0}px`;
     }
     
     updateTimeDisplay() {
@@ -814,9 +946,9 @@ class TimelineEditor {
                 let foliSummary = '—';
                 if (seg?.foli && typeof seg.foli === 'object') {
                     const parts = [];
-                    if (seg.foli.ch1?.class) parts.push(`ch1=${seg.foli.ch1.class}`);
-                    if (seg.foli.ch2?.class) parts.push(`ch2=${seg.foli.ch2.class}`);
-                    if (seg.foli.ch3?.class) parts.push(`ch3=${seg.foli.ch3.class}`);
+                    if (seg.foli.ch1?.class) parts.push(`Акцентный=${seg.foli.ch1.class}`);
+                    if (seg.foli.ch2?.class) parts.push(`Фоновый=${seg.foli.ch2.class}`);
+                    if (seg.foli.ch3?.class) parts.push(`Вторичный=${seg.foli.ch3.class}`);
                     foliSummary = parts.length ? parts.join(', ') : '—';
                 } else if (seg?.foli_class) {
                     foliSummary = seg.foli_class;
@@ -840,6 +972,8 @@ class TimelineEditor {
                 block.classList.remove('selected');
             }
         });
+        // Update info table and defaults
+        this.renderSelectionInfoTable();
     }
 
     renderTracksMixer() {
@@ -899,83 +1033,125 @@ class TimelineEditor {
     
     async generateForSelection(type) {
         if (this.selectedSegments.size === 0) {
-            alert('Выберите сегменты для генерации');
+            if (this.elements.selectionDetails) this.elements.selectionDetails.textContent = 'Выберите сегменты для генерации';
             return;
         }
-        
         let segmentIds = Array.from(this.selectedSegments);
         const jobId = this.projectData.job_id;
         let selectedChannel = undefined;
         if (type === 'foli') {
-            selectedChannel = (this.elements.foliChannelSelect?.value || 'ch1');
-            // Filter out segments where selected channel is Silence or missing
-            const beforeCount = segmentIds.length;
-            segmentIds = segmentIds.filter(id => {
-                const seg = this.segments[id];
-                const ch = seg?.foli?.[selectedChannel];
-                const label = ch?.class || seg?.foli_class;
-                return label && String(label).toLowerCase() !== 'silence';
-            });
-            if (segmentIds.length === 0) {
-                alert('Нет сегментов для генерации: выбранный канал = Silence во всех выделенных сегментах');
+            // Multi-channel checkboxes
+            const selected = Array.from(document.querySelectorAll('input[name="foli-channel"]:checked')).map(el => el.value);
+            if (selected.length === 0) {
+                if (this.elements.selectionDetails) this.elements.selectionDetails.textContent = 'Выберите хотя бы один канал для генерации фоли';
                 return;
             }
-            if (segmentIds.length < beforeCount) {
-                // Optional info
-                console.info(`Пропущено ${beforeCount - segmentIds.length} сегмент(ов) с каналом Silence`);
+            if (selected.length === 1) selectedChannel = selected[0];
+            if (selectedChannel) {
+                const beforeCount = segmentIds.length;
+                segmentIds = segmentIds.filter(id => {
+                    const seg = this.segments[id];
+                    const ch = seg?.foli?.[selectedChannel];
+                    const label = ch?.class || seg?.foli_class;
+                    return label && String(label).toLowerCase() !== 'silence';
+                });
+                if (segmentIds.length === 0) {
+                    if (this.elements.selectionDetails) this.elements.selectionDetails.textContent = 'Нет сегментов для генерации: выбранный канал = Silence';
+                    return;
+                }
+                if (this.elements.selectionDetails && beforeCount > segmentIds.length) {
+                    this.elements.selectionDetails.textContent = `Пропущено ${beforeCount - segmentIds.length} сегмент(ов) с Silence`;
+                }
             }
         }
-        
         // Show loading state
         const generateBtn = type === 'music' ? this.elements.generateMusicBtn : this.elements.generateFoliBtn;
-        const originalText = generateBtn.textContent;
-        generateBtn.disabled = true;
-        generateBtn.textContent = 'Генерация... 0%';
-        
+        const originalText = generateBtn.textContent; generateBtn.disabled = true; generateBtn.textContent = 'Генерация... 0%';
+        // Pre-create pending music track
+        let pendingId = null;
+        if (type === 'music') {
+            const ids = [...segmentIds].sort((a,b)=>a-b);
+            const first = this.segments[ids[0]]; const last = this.segments[ids[ids.length-1]];
+            const start = first?.start ?? 0; const end = last?.end ?? start;
+            let lengthSec = parseInt(this.elements.musicLenInput?.value || '0', 10);
+            if (!lengthSec || isNaN(lengthSec)) lengthSec = Math.max(3, Math.round(end - start));
+            const transitionLeft = (this.elements.musicFadeLeftSelect?.value || 'none');
+            const transitionRight = (this.elements.musicFadeRightSelect?.value || 'none');
+            pendingId = `music_pending_${Date.now()}`;
+            this.addTrack({
+                id: pendingId,
+                name: 'Музыка (генерация)…',
+                type: 'music',
+                start_time: start,
+                duration: lengthSec,
+                volume: 0.5,
+                enabled: true,
+                pending: true,
+                transition_left: transitionLeft,
+                transition_right: transitionRight
+            });
+        } else if (type === 'foli') {
+            const ids = [...segmentIds].sort((a,b)=>a-b);
+            const first = this.segments[ids[0]]; const last = this.segments[ids[ids.length-1]];
+            const start = first?.start ?? 0; const end = last?.end ?? start;
+            // Approximate duration across selection (backend generates per-segment; this is a visual placeholder)
+            let lengthSec = Math.max(5, Math.round(end - start || (first?.end - first?.start) || 5));
+            // Channel label
+            const chLabel = selectedChannel ? ` (${selectedChannel})` : '';
+            pendingId = `foli_pending_${Date.now()}`;
+            this.addTrack({
+                id: pendingId,
+                name: `Фоли (генерация)…${chLabel}`,
+                type: 'background',
+                start_time: start,
+                duration: lengthSec,
+                volume: 0.6,
+                enabled: true,
+                pending: true
+            });
+        }
         try {
-            // Create background task
             const response = await fetch(`/api/project/${jobId}/tasks/generate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     segment_ids: segmentIds,
                     type: type,
-                    foli_channel: selectedChannel
+                    foli_channel: selectedChannel,
+                    // optional music settings; backend may ignore if unsupported
+                    music_length: (type === 'music') ? parseInt(this.elements.musicLenInput?.value || '0', 10) : undefined,
+                    music_transition_left: (type === 'music') ? (this.elements.musicFadeLeftSelect?.value || 'none') : undefined,
+                    music_transition_right: (type === 'music') ? (this.elements.musicFadeRightSelect?.value || 'none') : undefined
                 })
             });
-            
             const data = await response.json();
             if (data.status === 'ok' && data.task_id) {
                 const taskId = data.task_id;
                 await this.pollGenerationTask(jobId, taskId, (progress, message) => {
                     generateBtn.textContent = `Генерация... ${progress}%`;
+                    if (pendingId) this.updatePendingTrackProgress(pendingId, progress, type);
                 });
-                // After completion, reload project or add returned tracks
                 try {
                     const taskResp = await fetch(`/api/project/${jobId}/tasks/${taskId}`);
                     const taskData = await taskResp.json();
+                    if (pendingId) this.tracks = this.tracks.filter(t => t.id !== pendingId);
                     if (taskData.state === 'completed' && Array.isArray(taskData.result_tracks)) {
                         taskData.result_tracks.forEach(track => this.addTrack(track));
                     } else {
-                        // Fallback: reload full project
-                        const pr = await fetch(`/api/project/${jobId}`);
-                        const projectData = await pr.json();
-                        this.tracks = projectData.tracks || [];
-                        this.renderTracks();
+                        const pr = await fetch(`/api/project/${jobId}`); const projectData = await pr.json();
+                        this.tracks = projectData.tracks || []; this.renderTracks();
                     }
-                } catch (e) {
-                    // ignore and fallback to alert
-                }
-                alert('Генерация завершена');
+                } catch (e) {}
+                if (this.elements.selectionDetails) this.elements.selectionDetails.textContent = 'Генерация завершена';
                 this.clearSelection();
             } else {
-                alert('Ошибка: ' + (data.detail || 'Неизвестная ошибка'));
+                if (this.elements.selectionDetails) this.elements.selectionDetails.textContent = 'Ошибка: ' + (data.detail || 'Неизвестная ошибка');
+                if (pendingId) { this.tracks = this.tracks.filter(t => t.id !== pendingId); this.renderTracks(); }
             }
         } catch (error) {
-            alert('Ошибка при генерации: ' + error.message);
+            if (this.elements.selectionDetails) this.elements.selectionDetails.textContent = 'Ошибка при генерации: ' + error.message;
+            if (pendingId) { this.tracks = this.tracks.filter(t => t.id !== pendingId); this.renderTracks(); }
         } finally {
-            generateBtn.disabled = false;
-            generateBtn.textContent = originalText;
+            generateBtn.disabled = false; generateBtn.textContent = originalText;
         }
     }
 
@@ -1113,6 +1289,42 @@ class TimelineEditor {
             'realization': '#4682B4',
         };
         return colors[emotion] || '#808080';
+    }
+
+    getLabelWidth() {
+        if (this._labelWidthCache && this._labelWidthCacheTime && (Date.now() - this._labelWidthCacheTime < 500)) return this._labelWidthCache;
+        const lbl = this.elements.tracksArea?.querySelector('.track-label');
+        const w = lbl ? (lbl.offsetWidth || 120) : 120;
+        this._labelWidthCache = w; this._labelWidthCacheTime = Date.now();
+        return w;
+    }
+
+    renderSelectionInfoTable() {
+        const tbl = this.elements.selectionInfoTable; if (!tbl) return;
+        const ids = Array.from(this.selectedSegments).sort((a,b)=>a-b);
+        if (ids.length === 0) { tbl.innerHTML=''; return; }
+        const first = this.segments[ids[0]]; const last = this.segments[ids[ids.length-1]];
+        const start = first?.start ?? 0; const end = last?.end ?? start; const total = Math.max(0, (end - start));
+        const rows = [];
+        rows.push(`<tr><td>Начало</td><td>${start.toFixed(2)} с</td></tr>`);
+        rows.push(`<tr><td>Конец</td><td>${end.toFixed(2)} с</td></tr>`);
+        rows.push(`<tr><td>Длительность</td><td>${total.toFixed(2)} с</td></tr>`);
+        // Helper to compute uniform value across selection
+        const uniformOrDash = (getter) => {
+            const values = ids.map(i => getter(this.segments[i]) || '').map(v => String(v));
+            const nonEmpty = values.filter(v => v !== '');
+            if (nonEmpty.length === 0) return ids.length === 1 ? '—' : '-';
+            const firstVal = nonEmpty[0];
+            const allSame = nonEmpty.every(v => v === firstVal);
+            return allSame ? firstVal : '-';
+        };
+        // Emotion
+        rows.push(`<tr><td>Эмоция</td><td>${uniformOrDash(seg => seg?.emotion)}</td></tr>`);
+        // Foley channels
+        rows.push(`<tr><td>Акцентный</td><td>${uniformOrDash(seg => seg?.foli?.ch1?.class)}</td></tr>`);
+        rows.push(`<tr><td>Фоновый</td><td>${uniformOrDash(seg => seg?.foli?.ch2?.class)}</td></tr>`);
+        rows.push(`<tr><td>Вторичный</td><td>${uniformOrDash(seg => seg?.foli?.ch3?.class)}</td></tr>`);
+        tbl.innerHTML = rows.join(''); if (this.elements.musicLenInput) this.elements.musicLenInput.value = Math.max(3, Math.round(total || 0)) || 3;
     }
 }
 

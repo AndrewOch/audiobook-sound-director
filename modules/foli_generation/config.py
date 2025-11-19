@@ -27,7 +27,7 @@ class FoliGenConfig:
     repo_id: str = "cvssp/audioldm2"
     device: str = "auto"
     use_fp16: bool = True
-    num_inference_steps: int = 200
+    num_inference_steps: int = 50
     audio_length_in_s: float = 10.0
     negative_prompt: Optional[str] = None
     num_waveforms_per_prompt: int = 1

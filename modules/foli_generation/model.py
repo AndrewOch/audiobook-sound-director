@@ -50,13 +50,28 @@ class AudioLDM2Model:
         # Load pipeline
         self.pipe = AudioLDM2Pipeline.from_pretrained(
             self.config.repo_id,
-            dtype=dtype,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
         )
 
         logger.info("Модель загружена, перемещение на устройство...")
 
         # Move to device
         self.pipe = self.pipe.to(self.device)
+        
+        # Compatibility: some checkpoints may provide GPT2Model instead of GPT2LMHeadModel
+        try:
+            from transformers import GPT2LMHeadModel, AutoModelForCausalLM
+            language_model = getattr(self.pipe, "language_model", None)
+            if language_model is not None and language_model.__class__.__name__ == "GPT2Model":
+                lm_name = getattr(language_model, "name_or_path", "gpt2")
+                try:
+                    upgraded_lm = GPT2LMHeadModel.from_pretrained(lm_name)
+                except Exception:
+                    upgraded_lm = AutoModelForCausalLM.from_pretrained(lm_name)
+                self.pipe.language_model = upgraded_lm.to(self.device)
+        except Exception as e:
+            logger.warning(f"Не удалось обновить language_model до GPT2LMHeadModel: {e}")
         
         logger.info("Модель AudioLDM2 готова к использованию")
 

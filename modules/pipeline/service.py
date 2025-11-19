@@ -423,9 +423,9 @@ class PipelineService:
                 seg_pred = clf.predict(text)
                 # seg_pred is expected to be channels dict {'ch1': {...}, 'ch2': {...}, 'ch3': {...}}
                 channels = seg_pred if isinstance(seg_pred, dict) else {}
-                # Apply confidence threshold: if prob < 0.6 -> Silence
+                # Apply confidence threshold: if prob < 0.4 -> Silence
                 norm_channels = {}
-                threshold = 0.6
+                threshold = 0.4
                 for ch in ("ch1", "ch2", "ch3"):
                     ch_data = dict((channels.get(ch) or {}))
                     prob = float(ch_data.get("prob") or ch_data.get("score") or 0.0)

@@ -116,6 +116,34 @@ const openProjectFromHomeBtn = document.getElementById('openProjectFromHome');
 if (openProjectFromHomeBtn) {
     openProjectFromHomeBtn.addEventListener('click', () => openProjectModal());
 }
+// Save project from home
+const saveProjectFromHomeBtn = document.getElementById('saveProjectFromHome');
+if (saveProjectFromHomeBtn) {
+    saveProjectFromHomeBtn.addEventListener('click', async () => {
+        try {
+            // Try saving via timeline editor if present
+            if (window.timelineEditor && typeof window.timelineEditor.saveProject === 'function') {
+                window.timelineEditor.saveProject();
+                return;
+            }
+            // Fallback: use currentJobId to persist minimal project state
+            if (!currentJobId) {
+                alert('Нет активного проекта для сохранения');
+                return;
+            }
+            const resp = await fetch(`/api/project/${currentJobId}`);
+            const project = await resp.json();
+            await fetch(`/api/project/${currentJobId}/save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(project)
+            });
+            alert('Проект сохранен');
+        } catch (e) {
+            alert('Ошибка сохранения: ' + (e?.message || String(e)));
+        }
+    });
+}
 
 // Modal controls and helpers
 const projectModal = document.getElementById('projectModal');
