@@ -294,6 +294,10 @@ class TimelineEditor {
             this.playheadPosition = this.audioElement.currentTime;
             this.updatePlayhead();
             this.updateTimeDisplay();
+            // While playing, start/stop generated tracks when playhead crosses their boundaries
+            if (this.isPlaying) {
+                this.updateTracksDuringPlayback();
+            }
         });
         this.audioElement.addEventListener('ended', () => {
             this.pause();
@@ -689,6 +693,47 @@ class TimelineEditor {
         
         this.updatePlayhead();
         this.updateTimeDisplay();
+    }
+    
+    updateTracksDuringPlayback() {
+        // Ensure generated tracks begin playing when playhead enters their range,
+        // and pause when playhead leaves it. Keep small drift correction.
+        const DRIFT_SEC = 0.25;
+        this.tracks.forEach(track => {
+            const audio = track.audioElement;
+            if (!audio) return;
+            const offset = this.playheadPosition - (track.start_time || 0);
+            const within = offset >= 0 && offset < (audio.duration || Infinity);
+            if (this.isPlaying && within) {
+                const startOrSync = () => {
+                    try {
+                        const desired = Math.max(0, offset);
+                        const drift = Math.abs((audio.currentTime || 0) - desired);
+                        if (audio.paused) {
+                            audio.currentTime = desired;
+                            audio.play().catch(() => {});
+                        } else if (drift > DRIFT_SEC) {
+                            audio.currentTime = desired;
+                        }
+                    } catch {}
+                };
+                if (audio.readyState >= 1) {
+                    startOrSync();
+                } else {
+                    const onReady = () => {
+                        audio.removeEventListener('loadedmetadata', onReady);
+                        audio.removeEventListener('canplay', onReady);
+                        startOrSync();
+                    };
+                    audio.addEventListener('loadedmetadata', onReady, { once: true });
+                    audio.addEventListener('canplay', onReady, { once: true });
+                }
+            } else {
+                if (!audio.paused) {
+                    try { audio.pause(); } catch {}
+                }
+            }
+        });
     }
     
     updatePlayhead() {

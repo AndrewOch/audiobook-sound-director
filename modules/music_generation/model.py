@@ -48,8 +48,11 @@ class MusicGenModel:
         else:
             self.device = self.config.device
 
-        # Prefer half precision on GPU/MPS for speed
-        dtype = torch.float16 if self.device in ("cuda", "mps") else torch.float32
+        # Use FP16 only on CUDA; MPS and CPU -> FP32 to avoid artifacts/white noise
+        if self.device == "cuda":
+            dtype = torch.float16
+        else:
+            dtype = torch.float32
 
         # Load model with desired dtype
         self.model = MusicgenForConditionalGeneration.from_pretrained(
@@ -62,6 +65,12 @@ class MusicGenModel:
         
         print(f"Using device: {self.device}, dtype: {dtype}")
         self.model.to(self.device)
+        # Improve matmul precision on MPS for stability
+        if self.device == "mps":
+            try:
+                torch.set_float32_matmul_precision("high")
+            except Exception:
+                pass
         
         # Get sampling rate from model config
         self.sampling_rate = self.model.config.audio_encoder.sampling_rate
