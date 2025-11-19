@@ -25,6 +25,8 @@ from .dto import (
     IngestResult,
     JobInfo,
     new_job,
+    SegmentEmotion,
+    SegmentFoli,
 )
 from modules.ingest import InputProcessor
 from modules.pipeline.registry import (
@@ -38,7 +40,7 @@ from modules.pipeline.registry import (
 class PipelineServiceConfig:
     enable_emotions: bool = True
     enable_foli_classification: bool = True
-    enable_music_generation: bool = True
+    enable_music_generation: bool = False
     enable_speech_generation: bool = False
     enable_foli_generation: bool = False
     enable_mixing: bool = False
@@ -259,34 +261,101 @@ class PipelineService:
 
     def _run_emotion_analysis(self, ingest_result: IngestResult, job: JobInfo) -> Tuple[List[Tuple[str, float]], Dict[str, Path]]:
         clf = get_emotion_classifier()
+        
+        # Analyze overall text for backward compatibility
         pred = clf.predict(ingest_result.text)
         top5 = pred.get("top5", [])
         # Convert to (emotion, prob) tuples
         emotions: List[Tuple[str, float]] = [(item["emotion"], float(item["prob"])) for item in top5]
 
-        # Save emotions JSON
+        # Save overall emotions JSON
         out_path = job.job_dir / "emotions.json"
         import json
-
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(pred, f, ensure_ascii=False, indent=2)
 
-        return emotions, {"emotions.json": out_path}
+        # Analyze each segment separately
+        segments_emotions: List[SegmentEmotion] = []
+        if ingest_result.segments:
+            self.logger.info("[Job %s] Analyzing emotions for %d segments", job.job_id, len(ingest_result.segments))
+            for idx, segment in enumerate(ingest_result.segments):
+                if segment.text and segment.text.strip():
+                    seg_pred = clf.predict(segment.text)
+                    seg_top5 = seg_pred.get("top5", [])
+                    seg_emotion = SegmentEmotion(
+                        segment_id=idx,
+                        start=segment.start,
+                        end=segment.end,
+                        text=segment.text,
+                        emotion=seg_pred.get("emotion", "neutral"),
+                        confidence=seg_pred.get("confidence", 0.0),
+                        top5=seg_top5,
+                    )
+                    segments_emotions.append(seg_emotion)
+            
+            # Save segment-based emotions
+            segments_path = job.job_dir / "segments_emotions.json"
+            with open(segments_path, "w", encoding="utf-8") as f:
+                json.dump([seg.to_dict() for seg in segments_emotions], f, ensure_ascii=False, indent=2)
+            self.logger.info("[Job %s] Saved emotions for %d segments", job.job_id, len(segments_emotions))
+
+        return emotions, {"emotions.json": out_path, "segments_emotions.json": segments_path if segments_emotions else None}
 
     def _run_foli_classification(self, ingest_result: IngestResult, job: JobInfo) -> Tuple[Dict, Dict[str, Path]]:
         clf = get_foli_classifier()
         backend = "onnx" if clf.__class__.__name__.endswith("ONNX") else "pytorch"
+        
+        # Classify overall text for backward compatibility
         pred = clf.predict(ingest_result.text)
         self.logger.info("[Job %s] Foli classification backend: %s", job.job_id, backend)
 
-        # Save predictions
+        # Save overall predictions
         out_path = job.job_dir / "foli_predictions.json"
         import json
-
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(pred, f, ensure_ascii=False, indent=2)
 
-        return pred, {"foli_predictions.json": out_path}
+        # Classify each segment separately
+        segments_foli: List[SegmentFoli] = []
+        if ingest_result.segments:
+            self.logger.info("[Job %s] Classifying foli for %d segments", job.job_id, len(ingest_result.segments))
+            for idx, segment in enumerate(ingest_result.segments):
+                if segment.text and segment.text.strip():
+                    seg_pred = clf.predict(segment.text)
+                    # Extract top class and confidence
+                    top_class = None
+                    top_confidence = None
+                    top5_list = []
+                    
+                    # Handle different prediction formats
+                    if isinstance(seg_pred, dict):
+                        if "class" in seg_pred:
+                            top_class = seg_pred.get("class")
+                            top_confidence = seg_pred.get("prob", seg_pred.get("confidence", 0.0))
+                        elif "top5" in seg_pred and seg_pred["top5"]:
+                            top_item = seg_pred["top5"][0]
+                            top_class = top_item.get("class") or top_item.get("label")
+                            top_confidence = top_item.get("prob") or top_item.get("score", 0.0)
+                            top5_list = seg_pred.get("top5", [])
+                    
+                    seg_foli = SegmentFoli(
+                        segment_id=idx,
+                        start=segment.start,
+                        end=segment.end,
+                        text=segment.text,
+                        foli_class=top_class,
+                        foli_confidence=top_confidence,
+                        top5=top5_list,
+                    )
+                    segments_foli.append(seg_foli)
+            
+            # Save segment-based foli classifications
+            segments_path = job.job_dir / "segments_foli.json"
+            with open(segments_path, "w", encoding="utf-8") as f:
+                json.dump([seg.to_dict() for seg in segments_foli], f, ensure_ascii=False, indent=2)
+            self.logger.info("[Job %s] Saved foli classifications for %d segments", job.job_id, len(segments_foli))
+
+        return pred, {"foli_predictions.json": out_path, "segments_foli.json": segments_path if segments_foli else None}
 
     def _run_music_generation(self, emotions: Optional[List[Tuple[str, float]]], job: JobInfo) -> Tuple[Path, Dict[str, Path]]:
         generator = get_music_generator()

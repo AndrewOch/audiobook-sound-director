@@ -20,10 +20,12 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
+from fastapi import Body
 import shutil
-from typing import Optional
+from typing import Optional, Dict, Any, List
 import uuid
 from datetime import datetime
+import json as _json
 
 from modules.pipeline import PipelineService, PipelineServiceConfig
 from modules.pipeline.dto import InputRequest, JobInfo, MixRequest, MixResponse
@@ -114,8 +116,8 @@ async def process_audiobook(
             "emotion_analysis": {"name": "emotion_analysis", "status": "pending"},
             "foli_classification": {"name": "foli_classification", "status": "pending"},
             "speech_generation": {"name": "speech_generation", "status": "skipped"},
-            "music_generation": {"name": "music_generation", "status": "pending"},
-            "foli_generation": {"name": "foli_generation", "status": "pending"},
+            "music_generation": {"name": "music_generation", "status": "skipped"},
+            "foli_generation": {"name": "foli_generation", "status": "skipped"},
             "mixing": {"name": "mixing", "status": "pending"},
         }
         status_payload = {
@@ -135,8 +137,8 @@ async def process_audiobook(
             service_cfg = PipelineServiceConfig(
                 enable_emotions=True,
                 enable_foli_classification=True,
-                enable_music_generation=True,
-                enable_foli_generation=True,
+                enable_music_generation=False,
+                enable_foli_generation=False,
                 enable_mixing=False,
             )
             service = PipelineService(output_root=OUTPUT_DIR, config=service_cfg)
@@ -299,3 +301,510 @@ async def download_file(job_id: str, filename: str):
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "Audiobook Sound Director"}
+
+
+# -----------------------------
+# Project Management Endpoints
+# -----------------------------
+
+@app.get("/api/project/{job_id}")
+async def get_project(job_id: str):
+    """Get complete project state including segments, emotions, foli, and tracks."""
+    job_dir = OUTPUT_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    import json as _json
+    
+    # Load transcript with segments
+    transcript_path = job_dir / "transcript.json"
+    segments = []
+    duration = 0.0
+    if transcript_path.exists():
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            transcript_data = _json.load(f)
+            segments = transcript_data.get("segments", [])
+            duration = transcript_data.get("duration", 0.0)
+    
+    # Load segment emotions
+    segments_emotions_path = job_dir / "segments_emotions.json"
+    segments_emotions = {}
+    if segments_emotions_path.exists():
+        with open(segments_emotions_path, "r", encoding="utf-8") as f:
+            emotions_list = _json.load(f)
+            for emo in emotions_list:
+                segments_emotions[emo["segment_id"]] = emo
+    
+    # Load segment foli
+    segments_foli_path = job_dir / "segments_foli.json"
+    segments_foli = {}
+    if segments_foli_path.exists():
+        with open(segments_foli_path, "r", encoding="utf-8") as f:
+            foli_list = _json.load(f)
+            for foli in foli_list:
+                segments_foli[foli["segment_id"]] = foli
+    
+    # Merge segments with emotions and foli
+    enriched_segments = []
+    for idx, seg in enumerate(segments):
+        # Use index as segment_id if not present
+        seg_id = seg.get("id", idx)
+        enriched_seg = {
+            "id": idx,  # Always use index for frontend
+            "start": seg.get("start", 0.0),
+            "end": seg.get("end", 0.0),
+            "text": seg.get("text", ""),
+            "emotion": segments_emotions.get(seg_id, {}).get("emotion", "neutral"),
+            "emotion_confidence": segments_emotions.get(seg_id, {}).get("confidence", 0.0),
+            "foli_class": segments_foli.get(seg_id, {}).get("foli_class"),
+            "foli_confidence": segments_foli.get(seg_id, {}).get("foli_confidence"),
+        }
+        enriched_segments.append(enriched_seg)
+    
+    # Load tracks
+    tracks = []
+    tracks_path = job_dir / "tracks.json"
+    if tracks_path.exists():
+        with open(tracks_path, "r", encoding="utf-8") as f:
+            tracks = _json.load(f)
+    
+    # Get audio URL
+    speech_wav = job_dir / "speech.wav"
+    audio_url = f"/output/{job_id}/speech.wav" if speech_wav.exists() else None
+    
+    project_state = {
+        "job_id": job_id,
+        "audio_url": audio_url,
+        "duration": duration,
+        "segments": enriched_segments,
+        "tracks": tracks,
+        "playhead_position": 0.0,
+        "zoom_level": 1.0,
+    }
+    
+    return JSONResponse(content=project_state)
+
+
+@app.get("/api/project/{job_id}/segments")
+async def get_segments(job_id: str):
+    """Get segments with emotions and foli classifications."""
+    job_dir = OUTPUT_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    import json as _json
+    
+    # Load transcript
+    transcript_path = job_dir / "transcript.json"
+    if not transcript_path.exists():
+        raise HTTPException(status_code=404, detail="Transcript not found")
+    
+    with open(transcript_path, "r", encoding="utf-8") as f:
+        transcript_data = _json.load(f)
+        segments = transcript_data.get("segments", [])
+    
+    # Load emotions
+    segments_emotions = {}
+    segments_emotions_path = job_dir / "segments_emotions.json"
+    if segments_emotions_path.exists():
+        with open(segments_emotions_path, "r", encoding="utf-8") as f:
+            emotions_list = _json.load(f)
+            for emo in emotions_list:
+                segments_emotions[emo["segment_id"]] = emo
+    
+    # Load foli
+    segments_foli = {}
+    segments_foli_path = job_dir / "segments_foli.json"
+    if segments_foli_path.exists():
+        with open(segments_foli_path, "r", encoding="utf-8") as f:
+            foli_list = _json.load(f)
+            for foli in foli_list:
+                segments_foli[foli["segment_id"]] = foli
+    
+    # Merge data
+    enriched_segments = []
+    for idx, seg in enumerate(segments):
+        enriched_seg = {
+            "id": idx,
+            "start": seg.get("start", 0.0),
+            "end": seg.get("end", 0.0),
+            "text": seg.get("text", ""),
+            "emotion": segments_emotions.get(idx, {}).get("emotion", "neutral"),
+            "emotion_confidence": segments_emotions.get(idx, {}).get("confidence", 0.0),
+            "foli_class": segments_foli.get(idx, {}).get("foli_class"),
+            "foli_confidence": segments_foli.get(idx, {}).get("foli_confidence"),
+        }
+        enriched_segments.append(enriched_seg)
+    
+    return JSONResponse(content={"segments": enriched_segments})
+
+
+@app.post("/api/project/{job_id}/generate-segments")
+async def generate_segments(job_id: str, request: Request):
+    """Generate music or foli sounds for selected segments."""
+    try:
+        payload = await request.json()
+        segment_ids = payload.get("segment_ids", [])
+        generate_type = payload.get("type", "music")  # "music" or "foli"
+        
+        if not segment_ids:
+            raise HTTPException(status_code=400, detail="No segments selected")
+        
+        job_dir = OUTPUT_DIR / job_id
+        if not job_dir.exists():
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        import json as _json
+        
+        # Load segments with emotions/foli
+        transcript_path = job_dir / "transcript.json"
+        segments_emotions_path = job_dir / "segments_emotions.json"
+        segments_foli_path = job_dir / "segments_foli.json"
+        
+        segments = []
+        segments_emotions = {}
+        segments_foli = {}
+        
+        if transcript_path.exists():
+            with open(transcript_path, "r", encoding="utf-8") as f:
+                transcript_data = _json.load(f)
+                segments = transcript_data.get("segments", [])
+        
+        if segments_emotions_path.exists():
+            with open(segments_emotions_path, "r", encoding="utf-8") as f:
+                emotions_list = _json.load(f)
+                for emo in emotions_list:
+                    segments_emotions[emo["segment_id"]] = emo
+        
+        if segments_foli_path.exists():
+            with open(segments_foli_path, "r", encoding="utf-8") as f:
+                foli_list = _json.load(f)
+                for foli in foli_list:
+                    segments_foli[foli["segment_id"]] = foli
+        
+        # Generate for each selected segment
+        generated_tracks = []
+        from modules.pipeline.registry import get_music_generator
+        
+        for seg_id in segment_ids:
+            if seg_id >= len(segments):
+                continue
+            
+            seg = segments[seg_id]
+            seg_emotion = segments_emotions.get(seg_id, {})
+            seg_foli = segments_foli.get(seg_id, {})
+            
+            if generate_type == "music":
+                # Generate music based on emotion
+                generator = get_music_generator()
+                emotions = [(seg_emotion.get("emotion", "neutral"), seg_emotion.get("confidence", 0.5))]
+                duration = seg.get("end", 0.0) - seg.get("start", 0.0)
+                duration = max(5.0, min(duration, 30.0))  # Clamp between 5-30 seconds
+                
+                audio = generator.generate_from_emotions(emotions, duration_seconds=int(duration))
+                output_path = job_dir / f"music_segment_{seg_id}.wav"
+                generator.save_audio(audio, output_path)
+                
+                generated_tracks.append({
+                    "id": f"music_segment_{seg_id}",
+                    "type": "music",
+                    "url": f"/output/{job_id}/music_segment_{seg_id}.wav",
+                    "start_time": seg.get("start", 0.0),
+                    "volume": 0.5,
+                    "enabled": True,
+                })
+            
+            elif generate_type == "foli":
+                # Generate foli based on classification
+                from modules.foli_generation import FoliGenerator, FoliGenConfig
+                foli_gen = FoliGenerator(FoliGenConfig())
+                foli_gen.load_model()
+                
+                prompt = f"The sound of {seg_foli.get('foli_class', 'ambient background')}. High quality, clear."
+                duration = seg.get("end", 0.0) - seg.get("start", 0.0)
+                duration = max(5.0, min(duration, 30.0))
+                
+                audio = foli_gen.generate(
+                    prompt=prompt,
+                    audio_length_in_s=duration,
+                )
+                output_path = job_dir / f"foli_segment_{seg_id}.wav"
+                foli_gen.save_audio(audio, output_path)
+                
+                generated_tracks.append({
+                    "id": f"foli_segment_{seg_id}",
+                    "type": "background",
+                    "url": f"/output/{job_id}/foli_segment_{seg_id}.wav",
+                    "start_time": seg.get("start", 0.0),
+                    "volume": 0.6,
+                    "enabled": True,
+                })
+        
+        return JSONResponse(content={
+            "status": "ok",
+            "tracks": generated_tracks,
+            "message": f"Generated {len(generated_tracks)} {generate_type} tracks"
+        })
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(
+            content={"status": "error", "detail": str(e)},
+            status_code=500
+        )
+
+
+@app.post("/api/project/{job_id}/save")
+async def save_project(job_id: str, request: Request):
+    """Save project state (for server-side storage if needed)."""
+    try:
+        payload = await request.json()
+        job_dir = OUTPUT_DIR / job_id
+        if not job_dir.exists():
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        import json as _json
+        project_state_path = job_dir / "project_state.json"
+        
+        payload["updated_at"] = datetime.now().isoformat()
+        
+        with open(project_state_path, "w", encoding="utf-8") as f:
+            _json.dump(payload, f, ensure_ascii=False, indent=2)
+        
+        return JSONResponse(content={"status": "ok", "message": "Project saved"})
+    
+    except Exception as e:
+        return JSONResponse(
+            content={"status": "error", "detail": str(e)},
+            status_code=500
+        )
+
+
+@app.get("/api/projects")
+async def list_projects():
+    """List all saved projects (from localStorage on client, this is optional server-side list)."""
+    # This could scan OUTPUT_DIR for project_state.json files
+    # For now, return empty list as projects are stored in localStorage
+    projects = []
+    
+    # Optional: scan for projects with project_state.json
+    if OUTPUT_DIR.exists():
+        for job_dir in OUTPUT_DIR.iterdir():
+            if job_dir.is_dir():
+                project_state_path = job_dir / "project_state.json"
+                if project_state_path.exists():
+                    import json as _json
+                    try:
+                        with open(project_state_path, "r", encoding="utf-8") as f:
+                            state = _json.load(f)
+                            projects.append({
+                                "job_id": state.get("job_id", job_dir.name),
+                                "created_at": state.get("created_at"),
+                                "updated_at": state.get("updated_at"),
+                                "duration": state.get("duration", 0.0),
+                            })
+                    except Exception:
+                        pass
+    
+    return JSONResponse(content={"projects": projects})
+
+
+# -----------------------------
+# Background generation tasks
+# -----------------------------
+
+def _tasks_file(job_dir: Path) -> Path:
+    return job_dir / "generation_tasks.json"
+
+def _read_json(path: Path, default: Any) -> Any:
+    try:
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return _json.load(f)
+    except Exception:
+        pass
+    return default
+
+def _write_json(path: Path, data: Any) -> None:
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _append_tracks(job_dir: Path, new_tracks: List[Dict[str, Any]]) -> None:
+    tracks_path = job_dir / "tracks.json"
+    tracks: List[Dict[str, Any]] = _read_json(tracks_path, default=[])
+    # deduplicate by id: replace existing with same id
+    existing_map: Dict[str, Dict[str, Any]] = {t["id"]: t for t in tracks if "id" in t}
+    for t in new_tracks:
+        existing_map[t["id"]] = t
+    tracks = list(existing_map.values())
+    _write_json(tracks_path, tracks)
+
+def _run_generation_task(job_id: str, job_dir: Path, task_id: str, kind: str, segment_ids: List[int]) -> None:
+    tasks_path = _tasks_file(job_dir)
+    tasks_state: Dict[str, Any] = _read_json(tasks_path, default={})
+    def update(state: Dict[str, Any]) -> None:
+        tasks_state[task_id] = state
+        _write_json(tasks_path, tasks_state)
+    try:
+        update({
+            "task_id": task_id,
+            "type": kind,
+            "segment_ids": segment_ids,
+            "state": "running",
+            "progress": 0,
+            "message": "Starting",
+            "created_at": datetime.now().isoformat()
+        })
+        # Load segment data
+        transcript_path = job_dir / "transcript.json"
+        segments_emotions_path = job_dir / "segments_emotions.json"
+        segments_foli_path = job_dir / "segments_foli.json"
+        transcript = _read_json(transcript_path, default={"segments": []})
+        segments = transcript.get("segments", [])
+        seg_emotions_list = _read_json(segments_emotions_path, default=[])
+        seg_foli_list = _read_json(segments_foli_path, default=[])
+        seg_emotions = {e.get("segment_id"): e for e in seg_emotions_list}
+        seg_foli = {f.get("segment_id"): f for f in seg_foli_list}
+
+        generated_tracks: List[Dict[str, Any]] = []
+        total = max(1, len(segment_ids))
+
+        if kind == "music":
+            from modules.pipeline.registry import get_music_generator
+            music_gen = get_music_generator()
+        elif kind == "foli":
+            from modules.foli_generation import FoliGenerator, FoliGenConfig
+            foli_gen = FoliGenerator(FoliGenConfig())
+            foli_gen.load_model()
+        else:
+            raise ValueError("Unsupported generation type")
+
+        for idx, seg_id in enumerate(segment_ids):
+            if seg_id >= len(segments):
+                continue
+            seg = segments[seg_id]
+            start_time = float(seg.get("start", 0.0))
+            duration = float(seg.get("end", 0.0)) - start_time
+            duration = max(5.0, min(duration, 30.0))
+
+            if kind == "music":
+                emo = seg_emotions.get(seg_id, {})
+                emotions = [(emo.get("emotion", "neutral"), float(emo.get("confidence", 0.5)))]
+                audio = music_gen.generate_from_emotions(emotions, duration_seconds=int(duration))
+                out_path = job_dir / f"music_segment_{seg_id}.wav"
+                music_gen.save_audio(audio, out_path)
+                generated_tracks.append({
+                    "id": f"music_segment_{seg_id}",
+                    "type": "music",
+                    "url": f"/output/{job_id}/music_segment_{seg_id}.wav",
+                    "start_time": start_time,
+                    "volume": 0.5,
+                    "enabled": True,
+                })
+            else:
+                ff = seg_foli.get(seg_id, {})
+                label = ff.get("foli_class", "ambient background")
+                prompt = f"The sound of {label}. High quality, clear."
+                audio = foli_gen.generate(prompt=prompt, audio_length_in_s=duration)
+                out_path = job_dir / f"foli_segment_{seg_id}.wav"
+                foli_gen.save_audio(audio, out_path)
+                generated_tracks.append({
+                    "id": f"foli_segment_{seg_id}",
+                    "type": "background",
+                    "url": f"/output/{job_id}/foli_segment_{seg_id}.wav",
+                    "start_time": start_time,
+                    "volume": 0.6,
+                    "enabled": True,
+                })
+            update({
+                "task_id": task_id,
+                "type": kind,
+                "segment_ids": segment_ids,
+                "state": "running",
+                "progress": int(((idx + 1) / total) * 100),
+                "message": f"Generated {idx+1}/{total}",
+                "created_at": tasks_state.get(task_id, {}).get("created_at"),
+            })
+
+        # Persist tracks
+        _append_tracks(job_dir, generated_tracks)
+        update({
+            "task_id": task_id,
+            "type": kind,
+            "segment_ids": segment_ids,
+            "state": "completed",
+            "progress": 100,
+            "message": f"Completed {len(generated_tracks)} tracks",
+            "result_tracks": generated_tracks,
+            "created_at": tasks_state.get(task_id, {}).get("created_at"),
+            "finished_at": datetime.now().isoformat(),
+        })
+    except Exception as e:
+        update({
+            "task_id": task_id,
+            "type": kind,
+            "segment_ids": segment_ids,
+            "state": "error",
+            "progress": 0,
+            "message": str(e),
+            "created_at": tasks_state.get(task_id, {}).get("created_at"),
+            "finished_at": datetime.now().isoformat(),
+        })
+
+@app.post("/api/project/{job_id}/tasks/generate")
+async def create_generation_task(job_id: str, request: Request, background_tasks: BackgroundTasks):
+    try:
+        payload = await request.json()
+        segment_ids = payload.get("segment_ids", [])
+        kind = payload.get("type", "music")
+        if not segment_ids:
+            raise HTTPException(status_code=400, detail="segment_ids is required")
+        job_dir = OUTPUT_DIR / job_id
+        if not job_dir.exists():
+            raise HTTPException(status_code=404, detail="Project not found")
+        task_id = f"t-{uuid.uuid4()}"
+        # create task entry
+        tasks_path = _tasks_file(job_dir)
+        tasks_state: Dict[str, Any] = _read_json(tasks_path, default={})
+        tasks_state[task_id] = {
+            "task_id": task_id,
+            "type": kind,
+            "segment_ids": segment_ids,
+            "state": "queued",
+            "progress": 0,
+            "message": "Queued",
+            "created_at": datetime.now().isoformat(),
+        }
+        _write_json(tasks_path, tasks_state)
+        # enqueue background processing
+        background_tasks.add_task(_run_generation_task, job_id, job_dir, task_id, kind, segment_ids)
+        return JSONResponse(content={"status": "ok", "task_id": task_id})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "detail": str(e)}, status_code=500)
+
+@app.get("/api/project/{job_id}/tasks/{task_id}")
+async def get_generation_task(job_id: str, task_id: str):
+    job_dir = OUTPUT_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    tasks_path = _tasks_file(job_dir)
+    tasks_state: Dict[str, Any] = _read_json(tasks_path, default={})
+    task = tasks_state.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return JSONResponse(content=task)
+
+@app.get("/api/project/{job_id}/tasks")
+async def list_generation_tasks(job_id: str):
+    job_dir = OUTPUT_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+    tasks_path = _tasks_file(job_dir)
+    tasks_state: Dict[str, Any] = _read_json(tasks_path, default={})
+    return JSONResponse(content={"tasks": list(tasks_state.values())})

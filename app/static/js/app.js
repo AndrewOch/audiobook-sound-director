@@ -87,6 +87,108 @@ const downloadMixBtn = document.getElementById('downloadMixBtn');
 
 let currentJobId = null;
 let audioElements = []; // {id, el, enabled, volume}
+let timelineEditor = null; // TimelineEditor instance
+
+// Open project modal from home button
+const openProjectFromHomeBtn = document.getElementById('openProjectFromHome');
+if (openProjectFromHomeBtn) {
+    openProjectFromHomeBtn.addEventListener('click', () => openProjectModal());
+}
+
+// Modal controls and helpers
+const projectModal = document.getElementById('projectModal');
+const projectModalBackdrop = document.getElementById('projectModalBackdrop');
+const projectModalClose = document.getElementById('projectModalClose');
+const projectModalCancel = document.getElementById('projectModalCancel');
+const projectListEl = document.getElementById('projectList');
+const projectSearch = document.getElementById('projectSearch');
+
+function showProjectModal() { if (projectModal) projectModal.classList.remove('hidden'); }
+function hideProjectModal() { if (projectModal) projectModal.classList.add('hidden'); }
+
+async function fetchProjects() {
+    let serverProjects = [];
+    try {
+        const resp = await fetch('/api/projects');
+        const data = await resp.json();
+        serverProjects = data.projects || [];
+    } catch {}
+    const localProjects = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('project_')) {
+            try {
+                const p = JSON.parse(localStorage.getItem(key));
+                localProjects.push({
+                    job_id: p.job_id,
+                    updated_at: p.updated_at,
+                    created_at: p.created_at,
+                    duration: p.duration,
+                    source: 'local'
+                });
+            } catch {}
+        }
+    }
+    const map = new Map();
+    [...serverProjects, ...localProjects].forEach(p => { if (p && p.job_id) map.set(p.job_id, p); });
+    return Array.from(map.values()).sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+}
+
+function renderProjectList(projects) {
+    if (!projectListEl) return;
+    projectListEl.innerHTML = '';
+    projects.forEach(p => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'w-full flex items-center justify-between px-3 py-3 hover:bg-gray-50';
+        const left = document.createElement('div');
+        left.className = 'flex flex-col text-left';
+        const id = document.createElement('span');
+        id.className = 'font-mono text-sm text-gray-800';
+        id.textContent = p.job_id;
+        const meta = document.createElement('span');
+        meta.className = 'text-xs text-gray-500';
+        meta.textContent = `Обновлён: ${new Date(p.updated_at || Date.now()).toLocaleString()} • Длительность: ${p.duration || 0}s`;
+        left.appendChild(id);
+        left.appendChild(meta);
+        const right = document.createElement('span');
+        right.className = 'material-icons-outlined text-gray-400';
+        right.textContent = 'chevron_right';
+        btn.appendChild(left);
+        btn.appendChild(right);
+        btn.addEventListener('click', async () => {
+            hideProjectModal();
+            await loadProjectToTimeline(p.job_id);
+            const mainCard = document.getElementById('audiobookForm')?.parentElement;
+            if (mainCard) mainCard.classList.add('hidden');
+        });
+        projectListEl.appendChild(btn);
+    });
+}
+
+async function openProjectModal() {
+    const projects = await fetchProjects();
+    renderProjectList(projects);
+    if (projectSearch) {
+        projectSearch.value = '';
+        projectSearch.oninput = (e) => {
+            const q = e.target.value.toLowerCase();
+            const filtered = projects.filter(p =>
+                String(p.job_id).toLowerCase().includes(q) ||
+                String(p.updated_at || '').toLowerCase().includes(q)
+            );
+            renderProjectList(filtered);
+        };
+    }
+    showProjectModal();
+}
+
+if (projectModalBackdrop) projectModalBackdrop.addEventListener('click', hideProjectModal);
+if (projectModalClose) projectModalClose.addEventListener('click', hideProjectModal);
+if (projectModalCancel) projectModalCancel.addEventListener('click', hideProjectModal);
+
+// Expose for timeline-editor reuse
+window.__openProjectModal = openProjectModal;
 
 if (form) {
     form.addEventListener('submit', async (e) => {
@@ -149,6 +251,50 @@ if (form) {
             form.parentElement.classList.remove('opacity-50', 'pointer-events-none');
         }
     });
+}
+
+async function loadProjectToTimeline(jobId) {
+    try {
+        currentJobId = jobId;
+        
+        // Load complete project data
+        const response = await fetch(`/api/project/${jobId}`);
+        if (!response.ok) {
+            throw new Error('Failed to load project');
+        }
+        
+        const projectData = await response.json();
+        
+        // Get timeline container
+        const timelineContainer = document.getElementById('timelineEditorContainer');
+        if (!timelineContainer) {
+            console.error('Timeline container not found');
+            throw new Error('Timeline container not found');
+        }
+        
+        // Initialize timeline editor if not already initialized
+        if (!timelineEditor) {
+            timelineEditor = new TimelineEditor('timelineEditorContainer');
+        }
+        
+        // Load project data
+        timelineEditor.loadProject(projectData);
+        
+        // Show timeline editor
+        timelineContainer.classList.remove('hidden');
+        
+        // Hide legacy editor
+        const trackEditor = document.getElementById('trackEditor');
+        if (trackEditor) {
+            trackEditor.classList.add('hidden');
+        }
+    } catch (error) {
+        try {
+            console.error('Error loading project:', error, error && error.stack);
+        } catch {}
+        const msg = (error && (error.message || String(error))) || 'Неизвестная ошибка';
+        alert('Ошибка загрузки проекта: ' + msg);
+    }
 }
 
 function renderTrackEditor(tracks) {
@@ -217,13 +363,10 @@ function startStatusPolling(jobId) {
 
             if (data.status === 'completed') {
                 clearInterval(interval);
-                // Load tracks
-                const tr = await fetch(`/api/tracks/${jobId}`);
-                const tracks = await tr.json();
-                renderTrackEditor(tracks);
+                // Load project data and initialize timeline editor
+                await loadProjectToTimeline(jobId);
                 processingStatus.classList.add('hidden');
                 form.parentElement.classList.add('hidden');
-                trackEditor.classList.remove('hidden');
             }
             if (data.status === 'error') {
                 clearInterval(interval);

@@ -30,14 +30,16 @@ def main():
     print("Emotions Classifier - Example Usage")
     print("=" * 70)
     
-    # Check if tokenizer is available
+    # Initialize classifier (loads model from HuggingFace)
     try:
+        print("Инициализация классификатора эмоций...")
+        print("(Модель будет загружена из HuggingFace при первом запуске)")
         classifier = EmotionClassifier()
         print("✅ Classifier initialized successfully\n")
-    except FileNotFoundError as e:
+    except Exception as e:
         print(f"❌ Error: {e}\n")
-        print("Please download the tokenizer first:")
-        print("  python train/emotions/download_data.py")
+        print("Убедитесь, что установлены необходимые библиотеки:")
+        print("  pip install transformers torch")
         return
     
     # Example texts

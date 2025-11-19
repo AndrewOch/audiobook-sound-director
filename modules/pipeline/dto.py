@@ -180,4 +180,81 @@ class MixResponse:
     detail: Optional[str] = None
 
 
+# -----------------------------
+# Segment-based Analysis DTOs
+# -----------------------------
+
+@dataclass
+class SegmentEmotion:
+    """Emotion analysis result for a single segment."""
+    segment_id: int
+    start: float
+    end: float
+    text: str
+    emotion: str
+    confidence: float
+    top5: List[Dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "segment_id": self.segment_id,
+            "start": self.start,
+            "end": self.end,
+            "text": self.text,
+            "emotion": self.emotion,
+            "confidence": self.confidence,
+            "top5": self.top5,
+        }
+
+
+@dataclass
+class SegmentFoli:
+    """Foli classification result for a single segment."""
+    segment_id: int
+    start: float
+    end: float
+    text: str
+    foli_class: Optional[str] = None
+    foli_confidence: Optional[float] = None
+    top5: List[Dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "segment_id": self.segment_id,
+            "start": self.start,
+            "end": self.end,
+            "text": self.text,
+            "foli_class": self.foli_class,
+            "foli_confidence": self.foli_confidence,
+            "top5": self.top5,
+        }
+
+
+@dataclass
+class ProjectState:
+    """Complete project state for saving/loading."""
+    job_id: str
+    audio_url: str
+    duration: float
+    segments: List[Dict[str, Any]] = field(default_factory=list)
+    tracks: List[Dict[str, Any]] = field(default_factory=list)
+    playhead_position: float = 0.0
+    zoom_level: float = 1.0
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "audio_url": self.audio_url,
+            "duration": self.duration,
+            "segments": self.segments,
+            "tracks": self.tracks,
+            "playhead_position": self.playhead_position,
+            "zoom_level": self.zoom_level,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 

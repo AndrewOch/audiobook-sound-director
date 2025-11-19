@@ -2,30 +2,57 @@
 Emotions Classifier Inference
 
 This module provides inference class for emotion classification
-using the AmbientDirector LSTM-based model.
+using the RuBERT-tiny2 model from HuggingFace fine-tuned for Russian emotion detection.
+Model: seara/rubert-tiny2-russian-emotion-detection-ru-go-emotions
 """
 
-import json
-from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
+import logging
 
-import numpy as np
-import torch
+from .config import InferenceConfig, DEFAULT_CONFIG
 
-from .config import (
-    CHECKPOINT_PATH,
-    EMOTION_LABELS_PATH,
-    TOKENIZER_PATH,
-    InferenceConfig,
-    DEFAULT_CONFIG,
-)
-from .model import AmbientDirector
+
+# Emotion labels mapping (28 classes from GoEmotions dataset)
+EMOTION_LABELS = {
+    0: "admiration",
+    1: "amusement",
+    2: "anger",
+    3: "annoyance",
+    4: "approval",
+    5: "caring",
+    6: "confusion",
+    7: "curiosity",
+    8: "desire",
+    9: "disappointment",
+    10: "disapproval",
+    11: "disgust",
+    12: "embarrassment",
+    13: "excitement",
+    14: "fear",
+    15: "gratitude",
+    16: "grief",
+    17: "joy",
+    18: "love",
+    19: "nervousness",
+    20: "optimism",
+    21: "pride",
+    22: "realization",
+    23: "relief",
+    24: "remorse",
+    25: "sadness",
+    26: "surprise",
+    27: "neutral",
+}
+
+# Reverse mapping: label -> id
+LABEL_TO_ID = {label: idx for idx, label in EMOTION_LABELS.items()}
 
 
 class EmotionClassifier:
     """
-    Emotion classifier using AmbientDirector model.
+    Emotion classifier using RuBERT-tiny2 model from HuggingFace.
     
+    Model: seara/rubert-tiny2-russian-emotion-detection-ru-go-emotions
     Classifies text into 28 emotion categories from the GoEmotions dataset.
     """
     
@@ -37,90 +64,43 @@ class EmotionClassifier:
             config: Inference configuration. If None, uses default config.
         """
         self.config = config or DEFAULT_CONFIG
-        self.emotion_labels = self._load_emotion_labels()
-        self.tokenizer = self._load_tokenizer()
-        
-        # Update vocab size from tokenizer
-        self.config.vocab_size = self.tokenizer.get_vocab_size()
-        
-        self.model = self._load_model()
-        self.model.eval()
+        self.logger = logging.getLogger("audiobook.emotions")
+        self.pipeline = None
+        self._load_model()
     
-    def _load_emotion_labels(self) -> dict:
-        """Load emotion labels from JSON file."""
-        if not EMOTION_LABELS_PATH.exists():
-            raise FileNotFoundError(
-                f"Emotion labels file not found: {EMOTION_LABELS_PATH}. "
-                f"Please ensure models are in the correct location."
-            )
-        
-        with open(EMOTION_LABELS_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    
-    def _load_tokenizer(self):
-        """Load tokenizer from file."""
+    def _load_model(self):
+        """Load the model from HuggingFace using transformers pipeline."""
         try:
-            from tokenizers import Tokenizer
+            from transformers import pipeline
         except ImportError:
             raise ImportError(
-                "tokenizers library is required. "
-                "Install it with: pip install tokenizers"
+                "transformers library is required. "
+                "Install it with: pip install transformers"
             )
         
-        if not TOKENIZER_PATH.exists():
-            raise FileNotFoundError(
-                f"Tokenizer file not found: {TOKENIZER_PATH}\n"
-                f"Please download it using:\n"
-                f"  python train/emotions/download_data.py\n"
-                f"Or manually download from:\n"
-                f"  https://drive.google.com/uc?id=1Atnpckju2lf31LU1li6HbGwIjp_pQRTK"
-            )
+        self.logger.info(f"Загрузка модели эмоций из HuggingFace: {self.config.model_name}")
+        self.logger.info("Это может занять некоторое время при первом запуске...")
         
-        return Tokenizer.from_file(str(TOKENIZER_PATH))
-    
-    def _load_model(self) -> AmbientDirector:
-        """Load the model from checkpoint."""
-        if not CHECKPOINT_PATH.exists():
-            raise FileNotFoundError(
-                f"Model checkpoint not found: {CHECKPOINT_PATH}. "
-                f"Please ensure the model file is in the correct location."
-            )
+        # Determine device for pipeline
+        # Transformers pipeline expects: -1 for CPU, 0+ for CUDA GPU, or device string
+        device_map = self.config.device
+        if device_map == "cpu":
+            device_map = -1
+        elif device_map == "cuda":
+            device_map = 0  # Use first GPU
+        elif device_map == "mps":
+            # MPS might not be fully supported by transformers, fallback to CPU
+            device_map = -1
         
-        # Create model with config parameters
-        model = AmbientDirector(
-            vocab_size=self.config.vocab_size,
-            embed_dim=self.config.embed_dim,
-            hidden_dim=self.config.hidden_dim,
-            num_classes=self.config.num_classes,
-            dropout_p=self.config.dropout_p,
-            padding_idx=self.config.padding_idx,
+        # Create pipeline for text classification
+        self.pipeline = pipeline(
+            "text-classification",
+            model=self.config.model_name,
+            device=device_map,
+            return_all_scores=True,  # Return all emotion scores, not just top-1
         )
         
-        # Load state dict
-        state_dict = torch.load(CHECKPOINT_PATH, map_location='cpu')
-        model.load_state_dict(state_dict)
-        model.to(self.config.device)
-        
-        return model
-    
-    def _tokenize(self, text: str) -> torch.Tensor:
-        """
-        Tokenize input text.
-        
-        Args:
-            text: Input text to tokenize
-        
-        Returns:
-            Tensor of token IDs with padding
-        """
-        # Encode text
-        encoding = self.tokenizer.encode(text)
-        ids = encoding.ids[:self.config.max_length]
-        
-        # Pad to max_length
-        ids += [self.config.padding_idx] * (self.config.max_length - len(ids))
-        
-        return torch.tensor([ids])
+        self.logger.info("Модель эмоций загружена и готова к использованию")
     
     def predict(self, text: str) -> Dict:
         """
@@ -140,29 +120,54 @@ class EmotionClassifier:
                 ]
             }
         """
-        # Tokenize input
-        input_ids = self._tokenize(text).to(self.config.device)
+        if self.pipeline is None:
+            raise RuntimeError("Model not loaded. Call _load_model() first.")
         
-        # Run inference
-        with torch.no_grad():
-            logits = self.model(input_ids)
-            probs = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
+        # Run inference using pipeline
+        # With return_all_scores=True, pipeline commonly returns a batch:
+        # [ [{'label': 'emotion', 'score': 0.95}, ...] ] for single input
+        # Normalize to a flat list of dicts: [{'label': str, 'score': float}, ...]
+        results = self.pipeline(text)
+        
+        scores_list: List[dict] = []
+        if isinstance(results, list) and len(results) > 0:
+            first = results[0]
+            if isinstance(first, list):
+                # Typical case: batch dimension present
+                scores_list = first
+            elif isinstance(first, dict) and 'score' in first:
+                # Some pipelines may return a flat list already
+                scores_list = results  # type: ignore[assignment]
+            else:
+                # Attempt to flatten any nested lists/dicts
+                for r in results:
+                    if isinstance(r, dict) and 'score' in r:
+                        scores_list.append(r)
+                    elif isinstance(r, list):
+                        for d in r:
+                            if isinstance(d, dict) and 'score' in d:
+                                scores_list.append(d)
+        
+        if not scores_list:
+            # Fallback if pipeline returns unexpected format
+            return {
+                'emotion': 'neutral',
+                'confidence': 0.0,
+                'top5': [{'emotion': 'neutral', 'prob': 0.0}],
+            }
+        
+        # Sort by score (descending), guarding against missing keys
+        sorted_scores = sorted(scores_list, key=lambda x: float(x.get('score', 0.0)), reverse=True)
         
         # Get top-k predictions
-        top_k_indices = np.argsort(probs)[-self.config.top_k:][::-1]
-        
-        # Format results
-        top_k_predictions = []
-        for idx in top_k_indices:
-            idx = int(idx)
-            emotion_name = self.emotion_labels['id2label'][str(idx)]
-            top_k_predictions.append({
-                'emotion': emotion_name,
-                'prob': float(probs[idx])
-            })
+        top_k_predictions: List[Dict[str, float]] = []
+        for item in sorted_scores[: self.config.top_k]:
+            emotion_name = item.get('label', 'neutral')
+            score = float(item.get('score', 0.0))
+            top_k_predictions.append({'emotion': emotion_name, 'prob': score})
         
         # Top-1 prediction
-        top_emotion = top_k_predictions[0]
+        top_emotion = top_k_predictions[0] if top_k_predictions else {'emotion': 'neutral', 'prob': 0.0}
         
         return {
             'emotion': top_emotion['emotion'],
@@ -184,8 +189,5 @@ class EmotionClassifier:
     
     def get_all_emotions(self) -> List[str]:
         """Get list of all emotion labels."""
-        return [
-            self.emotion_labels['id2label'][str(i)]
-            for i in range(self.config.num_classes)
-        ]
+        return list(EMOTION_LABELS.values())
 

@@ -1,9 +1,11 @@
 """
 Emotions Module - Text Emotion Classification
 
-This module provides emotion classification for text using an LSTM-based
-neural network. It classifies text into 28 emotion categories from the
-GoEmotions dataset.
+This module provides emotion classification for text using RuBERT-tiny2 model
+from HuggingFace fine-tuned for Russian emotion detection.
+Model: seara/rubert-tiny2-russian-emotion-detection-ru-go-emotions
+
+It classifies text into 28 emotion categories from the GoEmotions dataset.
 
 Example usage:
     >>> from modules.emotions import EmotionClassifier
@@ -15,14 +17,12 @@ Example usage:
 
 from .config import InferenceConfig, DEFAULT_CONFIG
 from .inference import EmotionClassifier
-from .model import AmbientDirector
 
 __all__ = [
     'EmotionClassifier',
     'InferenceConfig',
     'DEFAULT_CONFIG',
-    'AmbientDirector',
 ]
 
-__version__ = '1.0.0'
+__version__ = '2.0.0'
 
