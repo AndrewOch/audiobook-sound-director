@@ -1,6 +1,3 @@
-"""
-AudioLDM2 Model Wrapper for Foley Generation.
-"""
 
 from __future__ import annotations
 
@@ -12,10 +9,6 @@ from .config import FoliGenConfig
 
 
 class AudioLDM2Model:
-    """Wrapper around Diffusers AudioLDM2Pipeline.
-
-    Handles model loading, device/dtype selection, and pipeline access.
-    """
 
     def __init__(self, config: Optional[FoliGenConfig] = None):
         self.config = config or FoliGenConfig()
