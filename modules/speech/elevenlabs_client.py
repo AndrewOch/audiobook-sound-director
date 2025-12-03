@@ -13,6 +13,8 @@ import uuid
 
 import requests
 
+from modules.emotions.llm_emotional_markup import annotate_text
+
 
 logger = logging.getLogger("audiobook.speech.elevenlabs")
 
@@ -110,4 +112,58 @@ def get_elevenlabs_client() -> ElevenLabsClient:
 
 def safe_filename(prefix: str = "speech", suffix: str = ".mp3") -> str:
     return f"{prefix}_{uuid.uuid4().hex}{suffix}"
+
+
+def generate_speech_with_emotions(
+    text: str,
+    job_dir: Path,
+    voice_id: Optional[str] = None,
+    model_id: Optional[str] = None,
+    filename: str = "speech.wav",
+) -> Path:
+    """
+    Generate speech audio for the given text with LLM-based emotional markup.
+
+    Steps:
+    - annotate text with emotional/vocal tags via Scaleway LLM (if configured);
+    - synthesize speech via ElevenLabs TTS;
+    - convert to normalized WAV (48 kHz, stereo) saved as `filename` in job_dir.
+    """
+    job_dir = Path(job_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    raw_text = text or ""
+    marked_text = annotate_text(raw_text)
+
+    client = get_elevenlabs_client()
+
+    # First synthesize to MP3 (as ElevenLabs returns audio/mpeg by default)
+    tmp_mp3 = job_dir / safe_filename(prefix="speech_raw", suffix=".mp3")
+    logger.info("Generating ElevenLabs speech with emotional markup -> %s", tmp_mp3)
+    client.synthesize_to_file(
+        text=marked_text,
+        output_path=tmp_mp3,
+        voice_id=voice_id,
+        model_id=model_id,
+    )
+
+    # Then convert to normalized WAV for consistent playback in UI
+    target_wav = job_dir / filename
+    try:
+        from pydub import AudioSegment  # type: ignore
+
+        seg = AudioSegment.from_file(str(tmp_mp3))
+        if seg.frame_rate != 48000:
+            seg = seg.set_frame_rate(48000)
+        if seg.channels != 2:
+            seg = seg.set_channels(2)
+        seg.export(str(target_wav), format="wav")
+        logger.info("Created normalized speech WAV: %s", target_wav)
+        return target_wav
+    except Exception as exc:
+        logger.warning(
+            "Failed to convert ElevenLabs MP3 to WAV, using raw MP3 instead: %s", exc
+        )
+        return tmp_mp3
+
 

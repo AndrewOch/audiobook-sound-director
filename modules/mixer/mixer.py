@@ -39,7 +39,13 @@ class AudioMixer:
             raise ValueError("No tracks provided for mixing")
 
         segs = [self._load_and_prepare_segment(t) for t in track_list]
-        mixed = self._overlay_segments(segs)
+
+        # If any track has a non-zero start_time_s, honour time offsets by
+        # overlaying segments onto a silent base with appropriate positions.
+        if any(getattr(t, "start_time_s", 0.0) not in (0.0, None) for t in track_list):
+            mixed = self._overlay_segments_with_offsets(track_list, segs)
+        else:
+            mixed = self._overlay_segments(segs)
 
         if self.config.normalize:
             mixed = self._normalize_peak(mixed, self.config.target_peak_dbfs)
@@ -99,6 +105,46 @@ class AudioMixer:
         base = segments[0]
         for seg in segments[1:]:
             base = base.overlay(seg)
+        return base
+
+    def _overlay_segments_with_offsets(
+        self,
+        tracks: List[TrackSpec],
+        segments: List["AudioSegment"],
+    ):
+        """Overlay segments according to per-track start_time_s offsets."""
+        from pydub import AudioSegment
+
+        assert len(tracks) == len(segments) and len(tracks) > 0
+
+        # Compute total duration in milliseconds
+        total_ms = 0
+        for t, seg in zip(tracks, segments):
+            start_s = float(getattr(t, "start_time_s", 0.0) or 0.0)
+            if start_s < 0:
+                start_s = 0.0
+            start_ms = int(start_s * 1000)
+            end_ms = start_ms + len(seg)
+            if end_ms > total_ms:
+                total_ms = end_ms
+
+        if total_ms <= 0:
+            # Fallback to simple overlay if something went wrong
+            return self._overlay_segments(segments)
+
+        # Create silent base with desired duration/sample rate/channels
+        base = AudioSegment.silent(duration=total_ms, frame_rate=self.config.output_sample_rate)
+        if base.channels != self.config.output_channels:
+            base = base.set_channels(self.config.output_channels)
+
+        # Overlay each segment at its specified position
+        for t, seg in zip(tracks, segments):
+            start_s = float(getattr(t, "start_time_s", 0.0) or 0.0)
+            if start_s < 0:
+                start_s = 0.0
+            start_ms = int(start_s * 1000)
+            base = base.overlay(seg, position=start_ms)
+
         return base
 
     def _normalize_peak(self, seg: 'AudioSegment', target_peak_dbfs: float):

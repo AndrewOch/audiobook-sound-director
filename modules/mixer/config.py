@@ -23,12 +23,15 @@ class TrackSpec:
         channel: Background sub-channel id (e.g., 'ch1', 'ch2', 'ch3')
         gain_db: Per-track gain override in dB (applied on top of category
                  and background-channel gains). Defaults to 0.0 dB.
+        start_time_s: Optional start time offset (in seconds) at which this
+                      track should begin in the final mix. Defaults to 0.0.
     """
 
     path: str
     kind: TrackKind
     channel: Optional[str] = None
     gain_db: float = 0.0
+    start_time_s: float = 0.0
 
     def resolve_path(self) -> Path:
         return Path(self.path).expanduser().resolve()

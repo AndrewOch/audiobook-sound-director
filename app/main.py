@@ -110,46 +110,36 @@ async def process_audiobook(
         job_dir.mkdir(parents=True, exist_ok=True)
         job_info = JobInfo(job_id=job_id, job_dir=job_dir, created_at=datetime.now().isoformat())
 
-        def _synthesize_text_to_speech(text: str) -> Dict[str, Any]:
-            try:
-                client = get_elevenlabs_client()
-            except RuntimeError as err:
-                raise HTTPException(status_code=500, detail=str(err))
-            filename = safe_filename(prefix="speech", suffix=".mp3")
-            output_path = job_dir / filename
-            try:
-                client.synthesize_to_file(text=text, output_path=output_path)
-            except Exception as err:
-                raise HTTPException(status_code=502, detail=f"ElevenLabs error: {err}")
-            rel_url = f"/output/{output_path.relative_to(OUTPUT_DIR).as_posix()}"
-            return {
-                "path": str(output_path),
-                "audio_url": rel_url,
-                "filename": filename,
-            }
-
-        speech_info: Optional[Dict[str, Any]] = None
+        # Prepare payload for pipeline InputRequest depending on input type
+        input_payload: Dict[str, Any] = {}
 
         if input_type == "text":
             text_value = (text_input or "").strip()
             if not text_value:
                 raise HTTPException(status_code=400, detail="Text input is required")
-            speech_info = _synthesize_text_to_speech(text_value)
-            audio_path = Path(speech_info["path"])
+            input_payload["input_type"] = "text"
+            input_payload["text"] = text_value
         elif input_type == "text_file":
             if not text_file:
                 raise HTTPException(status_code=400, detail="Text file is required")
-            text_value = text_file.file.read().decode("utf-8", errors="ignore").strip()
-            if not text_value:
+            # Validate that file is not empty
+            file_content = text_file.file.read().decode("utf-8", errors="ignore")
+            if not file_content.strip():
                 raise HTTPException(status_code=400, detail="Uploaded text file is empty")
-            speech_info = _synthesize_text_to_speech(text_value)
-            audio_path = Path(speech_info["path"])
+            text_file.file.seek(0)
+            dst = job_dir / f"input_{text_file.filename}"
+            with open(dst, "wb") as f:
+                shutil.copyfileobj(text_file.file, f)
+            input_payload["input_type"] = "text_file"
+            input_payload["text_file_path"] = str(dst)
         elif input_type == "audio_file":
             if not audio_file:
                 raise HTTPException(status_code=400, detail="Audio file is required")
             audio_path = job_dir / f"input_{audio_file.filename}"
             with open(audio_path, "wb") as f:
                 shutil.copyfileobj(audio_file.file, f)
+            input_payload["input_type"] = "audio_file"
+            input_payload["audio_file_path"] = str(audio_path)
         else:
             raise HTTPException(status_code=400, detail="Unsupported input type")
 
@@ -159,7 +149,10 @@ async def process_audiobook(
             "transcription": {"name": "transcription", "status": "pending"},
             "emotion_analysis": {"name": "emotion_analysis", "status": "pending"},
             "foli_classification": {"name": "foli_classification", "status": "pending"},
-            "speech_generation": {"name": "speech_generation", "status": "skipped"},
+            "speech_generation": {
+                "name": "speech_generation",
+                "status": "pending" if input_type in ("text", "text_file") else "skipped",
+            },
             "music_generation": {"name": "music_generation", "status": "skipped"},
             "foli_generation": {"name": "foli_generation", "status": "skipped"},
             "mixing": {"name": "mixing", "status": "pending"},
@@ -177,17 +170,31 @@ async def process_audiobook(
             _json.dump(status_payload, f, ensure_ascii=False, indent=2)
 
         # Schedule background execution
-        def _run_pipeline_job(jid: str, apath: str):
+        def _run_pipeline_job(jid: str, itype: str, payload: Dict[str, Any]):
             service_cfg = PipelineServiceConfig(
                 enable_emotions=True,
                 enable_foli_classification=False,
                 enable_music_generation=False,
                 enable_foli_generation=False,
                 enable_mixing=False,
+                enable_speech_generation=itype in ("text", "text_file"),
             )
             service = PipelineService(output_root=OUTPUT_DIR, config=service_cfg)
             info = JobInfo(job_id=jid, job_dir=OUTPUT_DIR / jid, created_at=datetime.now().isoformat())
-            req = InputRequest(input_type="audio_file", audio_file_path=Path(apath))
+            if itype == "text":
+                req = InputRequest(input_type="text", text=payload["text"])
+            elif itype == "text_file":
+                req = InputRequest(
+                    input_type="text_file",
+                    text_file_path=Path(payload["text_file_path"]),
+                )
+            elif itype == "audio_file":
+                req = InputRequest(
+                    input_type="audio_file",
+                    audio_file_path=Path(payload["audio_file_path"]),
+                )
+            else:
+                raise ValueError(f"Unsupported input_type for pipeline job: {itype}")
             try:
                 service.start_job(req, job=info, execute=True)
             except Exception as e:
@@ -213,19 +220,14 @@ async def process_audiobook(
                 except Exception:
                     pass
 
-        background_tasks.add_task(_run_pipeline_job, job_id, str(audio_path))
+        background_tasks.add_task(_run_pipeline_job, job_id, input_type, input_payload)
 
-        response_payload = {
+        response_payload: Dict[str, Any] = {
             "job_id": job_id,
             "status": "queued",
             "message": "Processing started",
             "timestamp": datetime.now().isoformat(),
         }
-        if speech_info:
-            response_payload["speech"] = {
-                "filename": speech_info["filename"],
-                "audio_url": speech_info["audio_url"],
-            }
 
         return JSONResponse(content=response_payload)
 
@@ -289,9 +291,17 @@ async def mix_audio(request: Request):
             desc = track_descs.get(tid)
             if not desc or not enabled:
                 continue
+            # Fallbacks for legacy/generated tracks that may not have full metadata
+            path = desc.get("path")
+            if not path and "url" in desc:
+                # url is like /output/<job>/<file>; derive absolute path from it
+                url = str(desc["url"])
+                filename = url.split("/")[-1]
+                path = str(job_dir / filename)
+            kind = desc.get("kind") or desc.get("type") or "background"
             specs.append(MixerTrackSpec(
-                path=desc["path"],
-                kind=desc["kind"],
+                path=path,
+                kind=kind,
                 channel=desc.get("channel"),
                 gain_db=volume_to_db(vol),
             ))
@@ -314,6 +324,108 @@ async def mix_audio(request: Request):
     except Exception as e:
         return JSONResponse(content=MixResponse(
             job_id=payload.get("job_id", ""),
+            status="error",
+            detail=str(e)
+        ).__dict__, status_code=500)
+
+
+@app.post("/api/project/{job_id}/export")
+async def export_project_mix(job_id: str, request: Request):
+    """
+    Export final mix for a project using current timeline settings.
+    Expects JSON body:
+    {
+        "job_id": "<same_as_path>",
+        "tracks": [
+            {"id": "speech", "enabled": true, "volume": 1.0, "start_time": 0.0},
+            ...
+        ]
+    }
+    """
+    try:
+        payload = await request.json()
+        body_job_id = payload.get("job_id")
+        tracks_settings = payload.get("tracks", [])
+        if not body_job_id:
+            raise HTTPException(status_code=400, detail="job_id is required")
+        if body_job_id != job_id:
+            raise HTTPException(status_code=400, detail="job_id mismatch")
+
+        job_dir = OUTPUT_DIR / job_id
+        if not job_dir.exists():
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        tracks_json = job_dir / "tracks.json"
+        if not tracks_json.exists():
+            raise HTTPException(status_code=404, detail="Tracks not found for project")
+
+        # Load track descriptors from project (can be a mix of pipeline- and UI-generated tracks)
+        import json as _json
+        with open(tracks_json, "r", encoding="utf-8") as f:
+            track_descs = {t["id"]: t for t in _json.load(f) if "id" in t}
+
+        from modules.mixer.config import TrackSpec as MixerTrackSpec
+        from modules.mixer.mixer import AudioMixer
+
+        def volume_to_db(v: float) -> float:
+            # Map linear volume [0,1] to dB gain; clamp at -60 dB
+            try:
+                import math
+                v = max(0.0, min(1.0, float(v)))
+                if v <= 0.0005:
+                    return -60.0
+                return 20.0 * math.log10(v)
+            except Exception:
+                return 0.0
+
+        specs = []
+        for ts in tracks_settings:
+            tid = ts.get("id")
+            if not tid:
+                continue
+            enabled = bool(ts.get("enabled", True))
+            vol = float(ts.get("volume", 1.0))
+            start_time = float(ts.get("start_time", 0.0) or 0.0)
+
+            desc = track_descs.get(tid)
+            if not desc or not enabled:
+                continue
+
+            # Resolve absolute path to audio file
+            path = desc.get("path")
+            if not path and "url" in desc:
+                url = str(desc["url"])
+                filename = url.split("/")[-1]
+                path = str(job_dir / filename)
+
+            kind = desc.get("kind") or desc.get("type") or "background"
+
+            specs.append(MixerTrackSpec(
+                path=path,
+                kind=kind,
+                channel=desc.get("channel"),
+                gain_db=volume_to_db(vol),
+                start_time_s=start_time,
+            ))
+
+        if not specs:
+            raise HTTPException(status_code=400, detail="No enabled tracks to export")
+
+        mixer = AudioMixer()
+        output_path = job_dir / "final_mix.wav"
+        mixed_file = mixer.mix(specs, str(output_path))
+
+        return JSONResponse(content=MixResponse(
+            job_id=job_id,
+            status="ok",
+            download_url=f"/output/{job_id}/final_mix.wav"
+        ).__dict__)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(content=MixResponse(
+            job_id=job_id,
             status="error",
             detail=str(e)
         ).__dict__, status_code=500)

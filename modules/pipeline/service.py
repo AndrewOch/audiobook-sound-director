@@ -143,6 +143,7 @@ class PipelineService:
         # Execute enabled steps synchronously (may take time)
         try:
             emotions = None
+            speech_path = None
             if self.config.enable_emotions:
                 self.logger.info("[Job %s] Emotion analysis started", job_info.job_id)
                 steps["emotion_analysis"].status = "running"
@@ -156,6 +157,37 @@ class PipelineService:
                 self._save_status(job_info, steps, status="processing", message="Emotion analysis completed")
             else:
                 steps["emotion_analysis"].status = "skipped"
+
+            # Speech generation (for text/text_file inputs without original audio)
+            if self.config.enable_speech_generation and ingest_result.audio_path is None:
+                self.logger.info("[Job %s] Speech generation started", job_info.job_id)
+                steps["speech_generation"].status = "running"
+                self._save_status(
+                    job_info,
+                    steps,
+                    status="processing",
+                    message="Speech generation running",
+                )
+                t0 = time.perf_counter()
+                speech_path, speech_artifacts = self._run_speech_generation(ingest_result, job_info)
+                t1 = time.perf_counter()
+                self.logger.info(
+                    "[Job %s] Speech generation completed in %.2fs -> %s",
+                    job_info.job_id,
+                    (t1 - t0),
+                    speech_path,
+                )
+                steps["speech_generation"].status = "completed"
+                steps["speech_generation"].artifacts = speech_artifacts
+                self._save_status(
+                    job_info,
+                    steps,
+                    status="processing",
+                    message="Speech generation completed",
+                )
+            else:
+                # For audio_file inputs or when disabled we skip speech generation
+                steps["speech_generation"].status = "skipped"
 
             if self.config.enable_foli_classification:
                 self.logger.info("[Job %s] Foli classification started", job_info.job_id)
@@ -207,8 +239,7 @@ class PipelineService:
             else:
                 steps["foli_generation"].status = "skipped"
 
-            # Placeholders for not-yet-implemented modules
-            steps["speech_generation"].status = "skipped" if not self.config.enable_speech_generation else "pending"
+            # Placeholder for not-yet-implemented mixing module
             steps["mixing"].status = "skipped" if not self.config.enable_mixing else "pending"
 
             tracks = self._build_tracks(job_info, ingest_result)
@@ -475,6 +506,17 @@ class PipelineService:
         generator.save_audio(audio, music_path)
 
         return music_path, {"music.wav": music_path}
+
+    def _run_speech_generation(self, ingest_result: IngestResult, job: JobInfo) -> Tuple[Path, Dict[str, Path]]:
+        """Generate speech audio from text using ElevenLabs with emotional markup."""
+        from modules.speech import generate_speech_with_emotions
+
+        text = (ingest_result.text or "").strip()
+        if not text:
+            raise ValueError("Cannot generate speech for empty text")
+
+        speech_path = generate_speech_with_emotions(text=text, job_dir=job.job_dir)
+        return speech_path, {"speech.wav": speech_path}
 
     def _run_foli_generation(self, job: JobInfo) -> Tuple[List[Path], Dict[str, Path]]:
         """Generate background foley tracks via explicit module import.

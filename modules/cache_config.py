@@ -11,12 +11,12 @@
 
 import os
 from pathlib import Path
-
+from typing import Optional
 
 ENV_CACHE_ROOT = "AUDIOBOOK_CACHE_ROOT"
 
 
-def get_project_root(project_root: Path | None = None) -> Path:
+def get_project_root(project_root: Optional[Path] = None) -> Path:
     """
     Возвращает корень проекта. Если не передан явно — определяется
     относительно текущего файла (на один уровень вверх).
@@ -26,7 +26,7 @@ def get_project_root(project_root: Path | None = None) -> Path:
     return project_root
 
 
-def detect_external_disk_root(path: Path) -> Path | None:
+def detect_external_disk_root(path: Path) -> Optional[Path]:
     """
     Пытается определить корень внешнего диска по пути проекта.
     Если диск похож на внешний (Volumes, mnt, media), возвращает его корень,
@@ -50,7 +50,7 @@ def detect_external_disk_root(path: Path) -> Path | None:
     return None
 
 
-def get_cache_root(project_root: Path | None = None) -> Path:
+def get_cache_root(project_root: Optional[Path] = None) -> Path:
     """
     Возвращает корневую директорию для кэша.
 
@@ -60,7 +60,6 @@ def get_cache_root(project_root: Path | None = None) -> Path:
     3. Каталог .cache внутри проекта.
     """
     project_root = get_project_root(project_root)
-
     # 1. Явно переопределённый путь через env
     env_root = os.environ.get(ENV_CACHE_ROOT)
     if env_root:
@@ -75,7 +74,7 @@ def get_cache_root(project_root: Path | None = None) -> Path:
     return project_root / ".cache"
 
 
-def setup_cache_directories(project_root: Path | None = None) -> Path:
+def setup_cache_directories(project_root: Optional[Path] = None) -> Path:
     """
     Настраивает переменные окружения для перенаправления кэша.
     Возвращает путь к корневой директории кэша.
@@ -115,7 +114,7 @@ def setup_cache_directories(project_root: Path | None = None) -> Path:
     return cache_root
 
 
-def get_whisper_download_root(project_root: Path | None = None) -> Path:
+def get_whisper_download_root(project_root: Optional[Path] = None) -> Path:
     """
     Возвращает путь для загрузки моделей Whisper.
     Гарантированно лежит в том же корне кэша, что и остальной кэш.

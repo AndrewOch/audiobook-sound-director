@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 from typing import Optional
+import logging
 
 
 # These imports are intentionally inside functions in case some optional
@@ -23,12 +24,53 @@ _speech = None
 
 
 def get_emotion_classifier():
-    """Get a singleton instance of the EmotionClassifier."""
+    """Get a singleton instance of the EmotionClassifier.
+
+    Preference order:
+    1. LLM-based classifier via Scaleway (if configured via env vars).
+    2. Local HuggingFace/RuBERT-based EmotionClassifier as fallback.
+    """
     global _emotions
     with _lock:
-        if _emotions is None:
-            from modules.emotions.inference import EmotionClassifier
-            _emotions = EmotionClassifier()
+        if _emotions is not None:
+            return _emotions
+
+        logger = logging.getLogger("audiobook.pipeline")
+
+        # Try LLM-based classifier first (Scaleway API)
+        try:
+            from modules.emotions.llm_emotion_classifier import (
+                LLMEmotionClassifier,
+                build_llm_emotion_config_from_env,
+            )
+
+            llm_cfg = build_llm_emotion_config_from_env()
+            if llm_cfg is not None:
+                _emotions = LLMEmotionClassifier(llm_cfg)
+                logger.info(
+                    "Emotion classifier: using LLMEmotionClassifier (model=%s, project_id=%s)",
+                    llm_cfg.model,
+                    llm_cfg.project_id,
+                )
+                return _emotions
+            else:
+                logger.info(
+                    "Emotion classifier: LLM config not found "
+                    "(LLM_EMOTIONS_API_KEY / LLM_EMOTIONS_PROJECT_ID), "
+                    "falling back to local EmotionClassifier"
+                )
+        except Exception as exc:
+            logger.warning(
+                "Emotion classifier: failed to initialize LLMEmotionClassifier, "
+                "falling back to local EmotionClassifier: %s",
+                exc,
+            )
+
+        # Fallback: local RuBERT-based classifier
+        from modules.emotions.inference import EmotionClassifier
+
+        _emotions = EmotionClassifier()
+        logger.info("Emotion classifier: using local EmotionClassifier (HuggingFace model)")
         return _emotions
 
 

@@ -9,7 +9,14 @@ from .elevenlabs_client import (
     ElevenLabsConfig,
     get_elevenlabs_client,
     safe_filename,
+    generate_speech_with_emotions,
 )
 
-__all__ = ["ElevenLabsClient", "ElevenLabsConfig", "get_elevenlabs_client", "safe_filename"]
+__all__ = [
+    "ElevenLabsClient",
+    "ElevenLabsConfig",
+    "get_elevenlabs_client",
+    "safe_filename",
+    "generate_speech_with_emotions",
+]
 

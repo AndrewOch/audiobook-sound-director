@@ -10,6 +10,7 @@ import time
 import re
 import json
 import logging
+import os
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
@@ -36,6 +37,20 @@ class LLMEmotionConfig:
         """Construct base_url if not provided."""
         if self.base_url is None:
             self.base_url = f"https://api.scaleway.ai/{self.project_id}/v1"
+
+
+def build_llm_emotion_config_from_env() -> Optional[LLMEmotionConfig]:
+    """
+    Build LLMEmotionConfig from environment variables.
+
+    Returns None if mandatory values are missing.
+    """
+    api_key = os.getenv("LLM_EMOTIONS_API_KEY")
+    project_id = os.getenv("LLM_EMOTIONS_PROJECT_ID")
+    if not api_key or not project_id:
+        return None
+    model = os.getenv("LLM_EMOTIONS_MODEL", "llama-3.3-70b-instruct")
+    return LLMEmotionConfig(api_key=api_key, project_id=project_id, model=model)
 
 
 # System prompt for emotion analysis
@@ -103,7 +118,14 @@ class LLMEmotionClassifier:
             }
         """
         start_time = time.time()
-        
+        # Optional simple throttling to avoid hitting rate limits too hard
+        try:
+            delay_s = float(os.getenv("LLM_EMOTIONS_REQUEST_DELAY_S", "0") or "0")
+        except ValueError:
+            delay_s = 0.0
+        if delay_s > 0:
+            time.sleep(delay_s)
+
         try:
             response = self.client.chat.completions.create(
                 model=self.config.model,

@@ -80,6 +80,7 @@ class TimelineEditor {
             musicFadeRightSelect: document.getElementById('music-transition-right'),
             statusLine: document.getElementById('status-line'),
             selectionInfoTable: document.getElementById('selection-info-table'),
+            exportBtn: document.getElementById('timeline-export-btn'),
         };
         this.setupEventListeners();
     }
@@ -120,7 +121,11 @@ class TimelineEditor {
                         <span class="zoom-level" id="timeline-zoom-level">100%</span>
                         <button class="btn-zoom-in" id="timeline-zoom-in">+</button>
                     </div>
-                    <div class="toolbar-right"></div>
+                    <div class="toolbar-right">
+                        <button type="button" class="btn-save" id="timeline-export-btn" title="Экспорт финального микса">
+                            Экспорт микса
+                        </button>
+                    </div>
                 </div>
                 
                 <!-- Timeline Container -->
@@ -260,6 +265,7 @@ class TimelineEditor {
             musicFadeRightSelect: document.getElementById('music-transition-right'),
             statusLine: document.getElementById('status-line'),
             selectionInfoTable: document.getElementById('selection-info-table'),
+            exportBtn: document.getElementById('timeline-export-btn'),
         };
         
         // Verify all elements are found
@@ -291,6 +297,10 @@ class TimelineEditor {
         if (this.elements.endBtn) this.elements.endBtn.addEventListener('click', () => this.seekTo(this.projectData?.duration || 0));
         if (this.elements.rewindBtn) this.elements.rewindBtn.addEventListener('click', () => this.seekTo(Math.max(0, (this.playheadPosition - 10))));
         if (this.elements.forwardBtn) this.elements.forwardBtn.addEventListener('click', () => this.seekTo(Math.min((this.projectData?.duration || 0), (this.playheadPosition + 10))));
+        // Export mix
+        if (this.elements.exportBtn) {
+            this.elements.exportBtn.addEventListener('click', () => this.exportMix());
+        }
         
         // Panels toggles
         if (this.elements.selectionPanelToggle) this.elements.selectionPanelToggle.addEventListener('click', () => {
@@ -1002,6 +1012,8 @@ class TimelineEditor {
                 this.audioElement.volume = Math.max(0, Math.min(1, vol / 2));
             }
         });
+        // Keep reference for exportMix()
+        this._speechVolumeSlider = speechSlider;
         speechItem.appendChild(speechLabel);
         speechItem.appendChild(speechSlider);
         mixer.appendChild(speechItem);
@@ -1029,6 +1041,110 @@ class TimelineEditor {
             item.appendChild(slider);
             mixer.appendChild(item);
         });
+    }
+
+    async exportMix() {
+        try {
+            if (!this.projectData || !this.projectData.job_id) {
+                alert('Проект не загружен');
+                return;
+            }
+            const jobId = this.projectData.job_id;
+            const btn = this.elements.exportBtn;
+            const statusLine = this.elements.statusLine;
+            let originalText = '';
+            if (btn) {
+                originalText = btn.textContent || '';
+                btn.disabled = true;
+                btn.textContent = 'Экспорт...';
+            }
+            if (statusLine) {
+                statusLine.textContent = 'Экспорт финального микса...';
+            }
+
+            // Build tracks payload from current timeline state
+            const tracksPayload = [];
+
+            // Speech track (ID = 'speech'), volume 0..1 mapped from speech slider 0..2
+            let speechVolume = 1.0;
+            if (this._speechVolumeSlider) {
+                const val = parseFloat(this._speechVolumeSlider.value);
+                if (Number.isFinite(val)) {
+                    speechVolume = Math.max(0, Math.min(1, val / 2));
+                }
+            }
+            tracksPayload.push({
+                id: 'speech',
+                enabled: true,
+                volume: speechVolume,
+                start_time: 0.0,
+            });
+
+            // Generated tracks from timeline (skip pending tracks without готового файла)
+            (this.tracks || []).forEach(track => {
+                if (!track || track.pending) return;
+                const id = track.id;
+                if (!id) return;
+                const enabled = track.enabled !== false;
+                const vol = (typeof track.volume === 'number') ? track.volume : 0.5;
+                const startTime = (typeof track.start_time === 'number') ? track.start_time : 0.0;
+                tracksPayload.push({
+                    id,
+                    enabled,
+                    volume: vol,
+                    start_time: startTime,
+                });
+            });
+
+            if (!tracksPayload.length) {
+                if (statusLine) statusLine.textContent = 'Нет дорожек для экспорта';
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = originalText || 'Экспорт микса';
+                }
+                return;
+            }
+
+            const resp = await fetch(`/api/project/${jobId}/export`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    tracks: tracksPayload,
+                }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.status !== 'ok' || !data.download_url) {
+                const detail = data.detail || data.message || 'Не удалось экспортировать микс';
+                if (statusLine) statusLine.textContent = `Ошибка экспорта: ${detail}`;
+                alert(`Ошибка экспорта: ${detail}`);
+            } else {
+                const url = data.download_url;
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'final_mix.wav';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                if (statusLine) statusLine.textContent = 'Экспорт завершен, файл загружается';
+            }
+
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalText || 'Экспорт микса';
+            }
+        } catch (e) {
+            const msg = (e && (e.message || String(e))) || 'Неизвестная ошибка';
+            if (this.elements.statusLine) {
+                this.elements.statusLine.textContent = `Ошибка экспорта: ${msg}`;
+            }
+            alert(`Ошибка экспорта: ${msg}`);
+            const btn = this.elements.exportBtn;
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Экспорт микса';
+            }
+        }
     }
     
     async generateForSelection(type) {
