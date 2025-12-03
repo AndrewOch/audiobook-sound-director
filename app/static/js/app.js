@@ -89,6 +89,28 @@ let currentJobId = null;
 let audioElements = []; // {id, el, enabled, volume}
 let timelineEditor = null; // TimelineEditor instance
 
+const speechResult = document.getElementById('speechResult');
+
+async function synthesizeSpeechWithElevenLabs({ text, jobId } = {}) {
+    if (!text) {
+        throw new Error('Сначала введите текст');
+    }
+
+    const payload = { text };
+    if (jobId) payload.job_id = jobId;
+
+    const resp = await fetch('/api/speech/elevenlabs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.status !== 'ok') {
+        throw new Error(data.detail || data.error || 'Не удалось синтезировать речь');
+    }
+    return data;
+}
+
 // Open project modal from home button
 const openProjectFromHomeBtn = document.getElementById('openProjectFromHome');
 if (openProjectFromHomeBtn) {
@@ -197,8 +219,6 @@ if (form) {
         const formData = new FormData();
         const inputType = document.querySelector('input[name="inputType"]:checked').value;
 
-        formData.append('input_type', inputType);
-
         if (inputType === 'text') {
             const text = textInput.value.trim();
             if (!text) {
@@ -222,6 +242,8 @@ if (form) {
             formData.append('audio_file', file);
         }
 
+        formData.append('input_type', inputType);
+
         // Show processing status
         processingStatus.classList.remove('hidden');
         form.parentElement.classList.add('opacity-50', 'pointer-events-none');
@@ -235,10 +257,21 @@ if (form) {
             const result = await response.json();
 
             if (!response.ok) {
-                alert('Ошибка: ' + result.detail);
+                alert('Ошибка: ' + (result.detail || 'Неизвестная ошибка'));
                 processingStatus.classList.add('hidden');
                 form.parentElement.classList.remove('opacity-50', 'pointer-events-none');
                 return;
+            }
+
+            if (result.speech && speechResult) {
+                const absoluteUrl = new URL(result.speech.audio_url, window.location.origin).toString();
+                speechResult.innerHTML = `
+                    <div class="mt-2 p-3 border border-primary/30 rounded-lg bg-indigo-50/30">
+                        <p class="font-medium text-gray-800">Речь сгенерирована:</p>
+                        <a href="${absoluteUrl}" target="_blank" class="text-primary underline">${result.speech.filename}</a>
+                        <audio controls class="mt-2 w-full" src="${absoluteUrl}"></audio>
+                    </div>
+                `;
             }
 
             // Start polling job status until completed, then render track editor

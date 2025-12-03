@@ -129,7 +129,7 @@ class WhisperModel:
         try:
             result = self.model.transcribe(audio_path, **options)
             return result
-        except NotImplementedError as e:
+        except (NotImplementedError, TypeError) as e:
             if self.device == 'mps':
                 print(f"MPS transcribe failed, retrying on CPU: {e}")
                 self.unload()

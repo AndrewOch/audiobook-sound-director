@@ -147,8 +147,11 @@ class FoliClassifierPyTorch(FoliClassifierBase):
                 f"Please ensure models are in the correct location."
             )
         
-        # Load checkpoint
-        checkpoint = torch.load(CHECKPOINT_PATH, map_location='cpu')
+        # Load checkpoint (PyTorch 2.6 defaults to weights_only=True)
+        try:
+            checkpoint = torch.load(CHECKPOINT_PATH, map_location='cpu', weights_only=False)
+        except TypeError:
+            checkpoint = torch.load(CHECKPOINT_PATH, map_location='cpu')
         
         # Create model
         model = MultiHeadClassifier(

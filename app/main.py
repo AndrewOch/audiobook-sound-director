@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
 from fastapi import Body
+from pydantic import BaseModel
 import shutil
 from typing import Optional, Dict, Any, List
 import uuid
@@ -30,6 +31,7 @@ import json as _json
 from modules.pipeline import PipelineService, PipelineServiceConfig
 from modules.pipeline.dto import InputRequest, JobInfo, MixRequest, MixResponse
 from modules.pipeline.registry import warm_up
+from modules.speech import get_elevenlabs_client, safe_filename
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -56,6 +58,14 @@ app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
 
 # Setup templates
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+class ElevenLabsSpeechRequest(BaseModel):
+    text: str
+    voice_id: Optional[str] = None
+    model_id: Optional[str] = None
+    job_id: Optional[str] = None
+    filename: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -100,14 +110,48 @@ async def process_audiobook(
         job_dir.mkdir(parents=True, exist_ok=True)
         job_info = JobInfo(job_id=job_id, job_dir=job_dir, created_at=datetime.now().isoformat())
 
-        if input_type == "audio_file":
+        def _synthesize_text_to_speech(text: str) -> Dict[str, Any]:
+            try:
+                client = get_elevenlabs_client()
+            except RuntimeError as err:
+                raise HTTPException(status_code=500, detail=str(err))
+            filename = safe_filename(prefix="speech", suffix=".mp3")
+            output_path = job_dir / filename
+            try:
+                client.synthesize_to_file(text=text, output_path=output_path)
+            except Exception as err:
+                raise HTTPException(status_code=502, detail=f"ElevenLabs error: {err}")
+            rel_url = f"/output/{output_path.relative_to(OUTPUT_DIR).as_posix()}"
+            return {
+                "path": str(output_path),
+                "audio_url": rel_url,
+                "filename": filename,
+            }
+
+        speech_info: Optional[Dict[str, Any]] = None
+
+        if input_type == "text":
+            text_value = (text_input or "").strip()
+            if not text_value:
+                raise HTTPException(status_code=400, detail="Text input is required")
+            speech_info = _synthesize_text_to_speech(text_value)
+            audio_path = Path(speech_info["path"])
+        elif input_type == "text_file":
+            if not text_file:
+                raise HTTPException(status_code=400, detail="Text file is required")
+            text_value = text_file.file.read().decode("utf-8", errors="ignore").strip()
+            if not text_value:
+                raise HTTPException(status_code=400, detail="Uploaded text file is empty")
+            speech_info = _synthesize_text_to_speech(text_value)
+            audio_path = Path(speech_info["path"])
+        elif input_type == "audio_file":
             if not audio_file:
                 raise HTTPException(status_code=400, detail="Audio file is required")
             audio_path = job_dir / f"input_{audio_file.filename}"
             with open(audio_path, "wb") as f:
                 shutil.copyfileobj(audio_file.file, f)
         else:
-            raise HTTPException(status_code=400, detail="На данном этапе поддерживается только ввод аудиофайла")
+            raise HTTPException(status_code=400, detail="Unsupported input type")
 
         # Write initial queued status file
         initial_steps = {
@@ -136,7 +180,7 @@ async def process_audiobook(
         def _run_pipeline_job(jid: str, apath: str):
             service_cfg = PipelineServiceConfig(
                 enable_emotions=True,
-                enable_foli_classification=True,
+                enable_foli_classification=False,
                 enable_music_generation=False,
                 enable_foli_generation=False,
                 enable_mixing=False,
@@ -147,7 +191,11 @@ async def process_audiobook(
             try:
                 service.start_job(req, job=info, execute=True)
             except Exception as e:
-                # Ensure we persist an error status even if the pipeline failed early
+                error_file = job_dir / "error.log"
+                try:
+                    error_file.write_text(f"{datetime.now().isoformat()}\\n{str(e)}\\n", encoding="utf-8")
+                except Exception:
+                    pass
                 try:
                     import json as _json
                     err_payload = {
@@ -158,7 +206,7 @@ async def process_audiobook(
                         "steps": {
                             "ingest": {"name": "ingest", "status": "error", "detail": str(e)},
                         },
-                        "outputs": {},
+                        "outputs": {"error_log": f"/output/{jid}/{error_file.name}"} if error_file.exists() else {},
                     }
                     with open((OUTPUT_DIR / jid / "job_status.json"), "w", encoding="utf-8") as _f:
                         _json.dump(err_payload, _f, ensure_ascii=False, indent=2)
@@ -167,12 +215,19 @@ async def process_audiobook(
 
         background_tasks.add_task(_run_pipeline_job, job_id, str(audio_path))
 
-        return JSONResponse(content={
+        response_payload = {
             "job_id": job_id,
             "status": "queued",
             "message": "Processing started",
             "timestamp": datetime.now().isoformat(),
-        })
+        }
+        if speech_info:
+            response_payload["speech"] = {
+                "filename": speech_info["filename"],
+                "audio_url": speech_info["audio_url"],
+            }
+
+        return JSONResponse(content=response_payload)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -301,6 +356,45 @@ async def download_file(job_id: str, filename: str):
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "Audiobook Sound Director"}
+
+
+@app.post("/api/speech/elevenlabs")
+async def synthesize_speech_elevenlabs(payload: ElevenLabsSpeechRequest):
+    """Generate speech with ElevenLabs and save the audio file in the output directory."""
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    try:
+        client = get_elevenlabs_client()
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    target_dir = OUTPUT_DIR / (payload.job_id or "manual")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = payload.filename or safe_filename()
+    output_path = target_dir / filename
+
+    try:
+        audio_path = client.synthesize_to_file(
+            text=text,
+            output_path=output_path,
+            voice_id=payload.voice_id,
+            model_id=payload.model_id,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"ElevenLabs error: {e}")
+
+    relative_url = f"/output/{audio_path.relative_to(OUTPUT_DIR).as_posix()}"
+
+    return JSONResponse(content={
+        "status": "ok",
+        "voice_id": payload.voice_id or client.config.voice_id,
+        "model_id": payload.model_id or client.config.model_id,
+        "filename": audio_path.name,
+        "job_id": payload.job_id or "manual",
+        "audio_url": relative_url,
+    })
 
 
 # -----------------------------
@@ -437,6 +531,106 @@ async def get_segments(job_id: str):
         enriched_segments.append(enriched_seg)
     
     return JSONResponse(content={"segments": enriched_segments})
+
+
+@app.put("/api/project/{job_id}/segments/emotions")
+async def update_segment_emotions(job_id: str, request: Request):
+    """Update emotions for one or more segments.
+    
+    Request body should be:
+    {
+        "updates": [
+            {"segment_id": 0, "emotion": "happy", "confidence": 0.95},
+            {"segment_id": 1, "emotion": "sad", "confidence": 0.87}
+        ]
+    }
+    """
+    try:
+        payload = await request.json()
+        updates = payload.get("updates", [])
+        
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+        
+        job_dir = OUTPUT_DIR / job_id
+        if not job_dir.exists():
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        import json as _json
+        
+        # Load existing emotions
+        segments_emotions_path = job_dir / "segments_emotions.json"
+        segments_emotions_list = []
+        
+        if segments_emotions_path.exists():
+            with open(segments_emotions_path, "r", encoding="utf-8") as f:
+                segments_emotions_list = _json.load(f)
+        
+        # Convert to dict for easier updates
+        emotions_dict = {emo["segment_id"]: emo for emo in segments_emotions_list}
+        
+        # Load transcript to get segment info if needed
+        transcript_path = job_dir / "transcript.json"
+        segments = []
+        if transcript_path.exists():
+            with open(transcript_path, "r", encoding="utf-8") as f:
+                transcript_data = _json.load(f)
+                segments = transcript_data.get("segments", [])
+        
+        # Apply updates
+        updated_count = 0
+        for update in updates:
+            seg_id = update.get("segment_id")
+            if seg_id is None:
+                continue
+            
+            # Get or create emotion entry
+            if seg_id in emotions_dict:
+                emo_entry = emotions_dict[seg_id]
+            else:
+                # Create new entry if segment exists
+                if seg_id < len(segments):
+                    seg = segments[seg_id]
+                    emo_entry = {
+                        "segment_id": seg_id,
+                        "start": seg.get("start", 0.0),
+                        "end": seg.get("end", 0.0),
+                        "text": seg.get("text", ""),
+                        "emotion": "neutral",
+                        "confidence": 0.0,
+                        "top5": [],
+                    }
+                else:
+                    continue  # Skip invalid segment_id
+            
+            # Update emotion and confidence
+            if "emotion" in update:
+                emo_entry["emotion"] = update["emotion"]
+            if "confidence" in update:
+                emo_entry["confidence"] = float(update["confidence"])
+            
+            emotions_dict[seg_id] = emo_entry
+            updated_count += 1
+        
+        # Convert back to list and save
+        segments_emotions_list = [emotions_dict[seg_id] for seg_id in sorted(emotions_dict.keys())]
+        
+        with open(segments_emotions_path, "w", encoding="utf-8") as f:
+            _json.dump(segments_emotions_list, f, ensure_ascii=False, indent=2)
+        
+        return JSONResponse(content={
+            "status": "ok",
+            "message": f"Updated {updated_count} segment(s)",
+            "updated_count": updated_count,
+        })
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(
+            content={"status": "error", "detail": str(e)},
+            status_code=500
+        )
 
 
 @app.post("/api/project/{job_id}/generate-segments")

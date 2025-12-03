@@ -39,7 +39,18 @@ class InputProcessor:
                 raise ValueError("Text input is required for input_type='text'")
             self.logger.info("[Job %s] Ingest: received text input (len=%d)", job.job_id, len(request.text))
             self._save_text(job_dir, request.text)
-            return IngestResult(text=request.text)
+            
+            # Split text into segments for emotion analysis
+            segments = self._split_text_into_segments(request.text)
+            # Estimate duration: assume ~150 words per minute reading speed
+            estimated_duration = self._estimate_duration(request.text)
+            self._save_transcript_json(job_dir, request.text, language=None, duration=estimated_duration, segments=segments)
+            
+            return IngestResult(
+                text=request.text,
+                segments=segments,
+                duration=estimated_duration
+            )
 
         if request.input_type == "text_file":
             if not request.text_file_path or not Path(request.text_file_path).exists():
@@ -51,7 +62,18 @@ class InputProcessor:
             if Path(request.text_file_path) != dst:
                 shutil.copy2(request.text_file_path, dst)
             self._save_text(job_dir, text_content)
-            return IngestResult(text=text_content)
+            
+            # Split text into segments for emotion analysis
+            segments = self._split_text_into_segments(text_content)
+            # Estimate duration: assume ~150 words per minute reading speed
+            estimated_duration = self._estimate_duration(text_content)
+            self._save_transcript_json(job_dir, text_content, language=None, duration=estimated_duration, segments=segments)
+            
+            return IngestResult(
+                text=text_content,
+                segments=segments,
+                duration=estimated_duration
+            )
 
         if request.input_type == "audio_file":
             if not request.audio_file_path or not Path(request.audio_file_path).exists():
@@ -144,6 +166,64 @@ class InputProcessor:
         }
         with open(job_dir / "transcript.json", "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    def _split_text_into_segments(self, text: str) -> List[TranscriptSegment]:
+        """
+        Split text into segments for emotion analysis.
+        Splits by sentences (periods, exclamation, question marks).
+        """
+        import re
+        
+        # Split by sentence endings (., !, ?, followed by space or newline)
+        # Keep the punctuation with the sentence
+        sentence_pattern = r'([^.!?\n]+[.!?]+)\s*'
+        sentences = re.findall(sentence_pattern, text)
+        
+        # If no sentences found, split by newlines or use whole text
+        if not sentences:
+            # Try splitting by newlines
+            parts = [p.strip() for p in text.split('\n') if p.strip()]
+            if not parts:
+                parts = [text.strip()] if text.strip() else []
+            sentences = parts
+        
+        segments: List[TranscriptSegment] = []
+        current_time = 0.0
+        
+        # Estimate time per word: ~150 words per minute = 0.4 seconds per word
+        words_per_second = 150 / 60  # ~2.5 words per second
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            
+            # Estimate duration based on word count
+            word_count = len(sentence.split())
+            duration = word_count / words_per_second if word_count > 0 else 1.0
+            # Minimum segment duration: 0.5 seconds
+            duration = max(0.5, duration)
+            
+            segments.append(
+                TranscriptSegment(
+                    text=sentence,
+                    start=current_time,
+                    end=current_time + duration
+                )
+            )
+            current_time += duration
+        
+        return segments
+    
+    def _estimate_duration(self, text: str) -> float:
+        """
+        Estimate audio duration for text based on reading speed.
+        Assumes ~150 words per minute reading speed.
+        """
+        word_count = len(text.split())
+        words_per_minute = 150
+        duration_minutes = word_count / words_per_minute if word_count > 0 else 0.0
+        return duration_minutes * 60  # Convert to seconds
 
     def _ensure_preview_wav(self, job_dir: Path, src_audio: Path) -> Optional[Path]:
         try:

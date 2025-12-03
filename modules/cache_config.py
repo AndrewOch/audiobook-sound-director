@@ -1,123 +1,127 @@
 """
-Модуль для настройки путей кэша на внешний диск.
+Модуль для настройки путей кэша.
 
-Этот модуль перенаправляет все кэши моделей (HuggingFace, Whisper, PyTorch)
-в корень внешнего диска, чтобы избежать заполнения системного диска
-и сделать кэш доступным для всех проектов на этом диске.
+Если проект находится на внешнем диске (например, /Volumes/ADATA/...),
+кэш будет перенаправлён в корень этого диска.
+
+Если внешний диск определить не удалось, кэш будет размещён
+в каталоге .cache внутри проекта или в пути, указанном
+в переменной окружения AUDIOBOOK_CACHE_ROOT.
 """
 
 import os
 from pathlib import Path
 
 
-def get_external_disk_root(project_root: Path = None) -> Path:
+ENV_CACHE_ROOT = "AUDIOBOOK_CACHE_ROOT"
+
+
+def get_project_root(project_root: Path | None = None) -> Path:
     """
-    Определяет корень внешнего диска на основе пути проекта.
-    
-    Args:
-        project_root: Корневая директория проекта. Если None, определяется автоматически.
-        
-    Returns:
-        Path к корню внешнего диска (например, /Volumes/ADATA)
+    Возвращает корень проекта. Если не передан явно — определяется
+    относительно текущего файла (на один уровень вверх).
     """
     if project_root is None:
-        # Определяем корень проекта на основе расположения этого файла
         project_root = Path(__file__).resolve().parent.parent
-    
-    # Получаем абсолютный путь
-    abs_path = project_root.resolve()
-    parts = abs_path.parts
-    
-    # Ищем корень внешнего диска
-    # Для macOS: /Volumes/DISK_NAME
-    # Для Linux: /media/USER/DISK_NAME или /mnt/DISK_NAME
-    # Для Windows: D:\ или другой диск
-    
-    if len(parts) >= 3 and parts[0] == '/' and parts[1] == 'Volumes':
-        # macOS: /Volumes/DISK_NAME/...
-        return Path('/') / parts[1] / parts[2]
-    elif len(parts) >= 2 and parts[0] == '/' and parts[1] == 'mnt':
-        # Linux: /mnt/DISK_NAME/...
-        if len(parts) >= 3:
-            return Path('/') / parts[1] / parts[2]
-    elif len(parts) >= 4 and parts[0] == '/' and parts[1] == 'media':
-        # Linux: /media/USER/DISK_NAME/...
-        return Path('/') / parts[1] / parts[2] / parts[3]
-    
-    # Если не удалось определить, используем первый уровень после корня
-    # или возвращаем корень проекта как fallback
-    if len(parts) >= 2:
-        return Path('/') / parts[1]
-    
-    # Fallback: используем корень проекта
     return project_root
 
 
-def setup_cache_directories(project_root: Path = None):
+def detect_external_disk_root(path: Path) -> Path | None:
     """
-    Настраивает переменные окружения для перенаправления кэша в корень внешнего диска.
-    
-    Args:
-        project_root: Корневая директория проекта. Если None, определяется автоматически.
+    Пытается определить корень внешнего диска по пути проекта.
+    Если диск похож на внешний (Volumes, mnt, media), возвращает его корень,
+    иначе — None.
     """
-    if project_root is None:
-        # Определяем корень проекта на основе расположения этого файла
-        project_root = Path(__file__).resolve().parent.parent
-    
-    # Определяем корень внешнего диска
-    disk_root = get_external_disk_root(project_root)
-    
-    # Создаем директорию для кэша в корне внешнего диска
-    cache_dir = disk_root / ".cache"
-    cache_dir.mkdir(exist_ok=True)
-    
+    parts = path.resolve().parts
+
+    # macOS: /Volumes/DISK_NAME/...
+    if len(parts) >= 3 and parts[0] == "/" and parts[1] == "Volumes":
+        return Path("/") / parts[1] / parts[2]
+
+    # Linux: /mnt/DISK_NAME/...
+    if len(parts) >= 3 and parts[0] == "/" and parts[1] == "mnt":
+        return Path("/") / parts[1] / parts[2]
+
+    # Linux: /media/USER/DISK_NAME/...
+    if len(parts) >= 4 and parts[0] == "/" and parts[1] == "media":
+        return Path("/") / parts[1] / parts[2] / parts[3]
+
+    # Не похоже на внешний диск
+    return None
+
+
+def get_cache_root(project_root: Path | None = None) -> Path:
+    """
+    Возвращает корневую директорию для кэша.
+
+    Приоритет:
+    1. Переменная окружения AUDIOBOOK_CACHE_ROOT (если указана).
+    2. Корень внешнего диска (если проект на нём).
+    3. Каталог .cache внутри проекта.
+    """
+    project_root = get_project_root(project_root)
+
+    # 1. Явно переопределённый путь через env
+    env_root = os.environ.get(ENV_CACHE_ROOT)
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+
+    # 2. Попытка определить внешний диск
+    external_root = detect_external_disk_root(project_root)
+    if external_root is not None:
+        return external_root / ".cache" / "audiobook-sound-director"
+
+    # 3. Fallback: локальный .cache в проекте
+    return project_root / ".cache"
+
+
+def setup_cache_directories(project_root: Path | None = None) -> Path:
+    """
+    Настраивает переменные окружения для перенаправления кэша.
+    Возвращает путь к корневой директории кэша.
+    """
+    project_root = get_project_root(project_root)
+    cache_root = get_cache_root(project_root)
+
+    # Создаём основную директорию кэша
+    cache_root.mkdir(parents=True, exist_ok=True)
+
     # HuggingFace кэш (для transformers, diffusers, MusicGen, AudioLDM2)
-    hf_cache = cache_dir / "huggingface"
-    hf_cache.mkdir(exist_ok=True)
+    hf_cache = cache_root / "huggingface"
+    hf_cache.mkdir(parents=True, exist_ok=True)
     os.environ["HF_HOME"] = str(hf_cache)
     os.environ["HUGGINGFACE_HUB_CACHE"] = str(hf_cache)
     os.environ["TRANSFORMERS_CACHE"] = str(hf_cache)
     os.environ["HF_DATASETS_CACHE"] = str(hf_cache / "datasets")
-    
+
     # Whisper кэш
-    whisper_cache = cache_dir / "whisper"
-    whisper_cache.mkdir(exist_ok=True)
+    whisper_cache = cache_root / "whisper"
+    whisper_cache.mkdir(parents=True, exist_ok=True)
     os.environ["WHISPER_CACHE_DIR"] = str(whisper_cache)
-    
+
     # PyTorch кэш (для torch.hub)
-    torch_cache = cache_dir / "torch"
-    torch_cache.mkdir(exist_ok=True)
+    torch_cache = cache_root / "torch"
+    torch_cache.mkdir(parents=True, exist_ok=True)
     os.environ["TORCH_HOME"] = str(torch_cache)
-    
+
     # Общий кэш (XDG_CACHE_HOME для Unix-систем)
-    # Это влияет на многие библиотеки, которые используют стандартные пути кэша
-    os.environ["XDG_CACHE_HOME"] = str(cache_dir)
-    
+    os.environ["XDG_CACHE_HOME"] = str(cache_root)
+
     # Временные файлы Python (tempfile)
-    # Перенаправляем на внешний диск, если возможно
-    temp_dir = cache_dir / "tmp"
-    temp_dir.mkdir(exist_ok=True)
-    # Примечание: TMPDIR/TMP влияет на tempfile, но не все библиотеки его используют
-    
-    return cache_dir
+    temp_dir = cache_root / "tmp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("TMPDIR", str(temp_dir))
+
+    return cache_root
 
 
-def get_whisper_download_root(project_root: Path = None) -> Path:
+def get_whisper_download_root(project_root: Path | None = None) -> Path:
     """
     Возвращает путь для загрузки моделей Whisper.
-    
-    Args:
-        project_root: Корневая директория проекта. Если None, определяется автоматически.
-        
-    Returns:
-        Path к директории для моделей Whisper в корне внешнего диска
+    Гарантированно лежит в том же корне кэша, что и остальной кэш.
     """
-    if project_root is None:
-        project_root = Path(__file__).resolve().parent.parent
-    
-    # Используем корень внешнего диска
-    disk_root = get_external_disk_root(project_root)
-    whisper_cache = disk_root / ".cache" / "whisper"
+    project_root = get_project_root(project_root)
+    cache_root = get_cache_root(project_root)
+    whisper_cache = cache_root / "whisper"
     whisper_cache.mkdir(parents=True, exist_ok=True)
     return whisper_cache
-
