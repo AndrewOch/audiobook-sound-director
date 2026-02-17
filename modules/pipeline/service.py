@@ -508,8 +508,8 @@ class PipelineService:
         return music_path, {"music.wav": music_path}
 
     def _run_speech_generation(self, ingest_result: IngestResult, job: JobInfo) -> Tuple[Path, Dict[str, Path]]:
-        """Generate speech audio from text using ElevenLabs with emotional markup."""
-        from modules.speech import generate_speech_with_emotions
+        """Generate speech audio from text using Yandex SpeechKit with emotional markup."""
+        from modules.speech.yandex_speechkit_client import generate_speech_with_emotions
 
         text = (ingest_result.text or "").strip()
         if not text:

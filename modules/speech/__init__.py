@@ -1,7 +1,7 @@
 """
 Speech generation utilities.
 
-Currently exposes ElevenLabs client helpers.
+Exposes ElevenLabs and Yandex SpeechKit client helpers.
 """
 
 from .elevenlabs_client import (
@@ -11,6 +11,11 @@ from .elevenlabs_client import (
     safe_filename,
     generate_speech_with_emotions,
 )
+from .yandex_speechkit_client import (
+    YandexSpeechKitClient,
+    YandexSpeechKitConfig,
+    get_yandex_speechkit_client,
+)
 
 __all__ = [
     "ElevenLabsClient",
@@ -18,5 +23,8 @@ __all__ = [
     "get_elevenlabs_client",
     "safe_filename",
     "generate_speech_with_emotions",
+    "YandexSpeechKitClient",
+    "YandexSpeechKitConfig",
+    "get_yandex_speechkit_client",
 ]
 
